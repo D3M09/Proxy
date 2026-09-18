@@ -94,18 +94,21 @@ $voucher = $contentConfig['voucher'] ?? [];
 $voucherSrc = '/' . ltrim((string) ($voucher['path'] ?? '/m/voucherCenter'), '/');
 $mBase = rtrim($voucherSrc, '/'); // e.g. /m/voucherCenter or /m
 
-// Serve VoucherCenter assets from /m/js/, /m/css/, /m/img/ and /m/meta-img.png etc.
+// Serve VoucherCenter assets from /m/js/, /m/css/, /m/img/ etc. (not HTML pages)
 if (strpos($mBase, '/m') === 0) {
     $mPrefix = '/m';
     if (strpos($path, $mPrefix . '/') === 0) {
         $mSub = substr($path, strlen($mPrefix));
-        $vcFile = dirname(__DIR__) . '/voucherCenter' . $mSub;
-        if (is_file($vcFile)) {
-            $ext = pathinfo($vcFile, PATHINFO_EXTENSION);
-            $mimeTypes = ['css'=>'text/css; charset=utf-8','js'=>'application/javascript; charset=utf-8','json'=>'application/json; charset=utf-8','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','svg'=>'image/svg+xml','webp'=>'image/webp','ico'=>'image/x-icon','woff'=>'font/woff','woff2'=>'font/woff2','ttf'=>'font/ttf','html'=>'text/html; charset=utf-8'];
-            if (isset($mimeTypes[$ext])) header('Content-Type: ' . $mimeTypes[$ext]);
-            readfile($vcFile);
-            exit;
+        $ext = strtolower(pathinfo($mSub, PATHINFO_EXTENSION));
+        // Only serve non-HTML static assets (JS, CSS, images, fonts)
+        if ($ext !== '' && $ext !== 'html' && $ext !== 'htm' && $ext !== 'php') {
+            $vcFile = dirname(__DIR__) . '/voucherCenter' . $mSub;
+            if (is_file($vcFile)) {
+                $mimeTypes = ['css'=>'text/css; charset=utf-8','js'=>'application/javascript; charset=utf-8','json'=>'application/json; charset=utf-8','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','svg'=>'image/svg+xml','webp'=>'image/webp','ico'=>'image/x-icon','woff'=>'font/woff','woff2'=>'font/woff2','ttf'=>'font/ttf'];
+                if (isset($mimeTypes[$ext])) header('Content-Type: ' . $mimeTypes[$ext]);
+                readfile($vcFile);
+                exit;
+            }
         }
     }
 }
