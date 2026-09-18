@@ -27,5 +27,17 @@ if ($uri !== '/' && is_file(__DIR__ . $uri)) {
     return true;
 }
 
+// Admin panel - serve locally
+if ($uri === '/admin' || strpos($uri, '/admin/') === 0) {
+    require __DIR__ . '/admin/index.php';
+    return true;
+}
+
+// Setup installer - serve locally
+if ($uri === '/setup' || $uri === '/setup/' || $uri === '/setup.php') {
+    require __DIR__ . '/setup.php';
+    return true;
+}
+
 // Route everything else through index.php
 require __DIR__ . '/index.php';
