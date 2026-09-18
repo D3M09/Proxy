@@ -90,20 +90,27 @@ if (strpos($path, '/voucherCenter/') === 0) {
 // Admin-controlled redirect for the voucher center route. When enabled, the
 // matching path is served locally instead of being proxied.
 $voucher = $contentConfig['voucher'] ?? [];
-if (!empty($voucher['enabled'])) {
-    $voucherSrc = '/' . ltrim((string) ($voucher['path'] ?? '/m/voucherCenter'), '/');
-    if (preg_match('~^' . preg_quote($voucherSrc, '~') . '/?$~i', (string) $path)) {
-        // Serve VoucherCenter locally at the original path (no redirect)
-        $localPath = preg_replace('~^' . preg_quote($voucherSrc, '~') . '~i', '', $path);
-        $localFile = __DIR__ . '/VoucherCenter' . ($localPath !== '' ? $localPath : '/index.html');
-        if ($localPath === '' || $localPath === '/') $localFile = __DIR__ . '/VoucherCenter/index.html';
-        if (is_file($localFile)) {
-            $ext = pathinfo($localFile, PATHINFO_EXTENSION);
+$voucherSrc = '/' . ltrim((string) ($voucher['path'] ?? '/m/voucherCenter'), '/');
+$mBase = rtrim($voucherSrc, '/'); // e.g. /m/voucherCenter or /m
+
+// Serve VoucherCenter assets from /m/js/, /m/css/, /m/img/ and /m/meta-img.png etc.
+if (strpos($mBase, '/m') === 0) {
+    $mPrefix = '/m';
+    if (strpos($path, $mPrefix . '/') === 0) {
+        $mSub = substr($path, strlen($mPrefix));
+        $vcFile = __DIR__ . '/VoucherCenter' . $mSub;
+        if (is_file($vcFile)) {
+            $ext = pathinfo($vcFile, PATHINFO_EXTENSION);
             $mimeTypes = ['css'=>'text/css','js'=>'application/javascript','json'=>'application/json','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','svg'=>'image/svg+xml','webp'=>'image/webp','ico'=>'image/x-icon','woff'=>'font/woff','woff2'=>'font/woff2','ttf'=>'font/ttf','html'=>'text/html'];
             if (isset($mimeTypes[$ext])) header('Content-Type: ' . $mimeTypes[$ext]);
-            readfile($localFile);
+            readfile($vcFile);
             exit;
         }
+    }
+}
+
+if (!empty($voucher['enabled'])) {
+    if (preg_match('~^' . preg_quote($voucherSrc, '~') . '/?$~i', (string) $path)) {
         readfile(__DIR__ . '/VoucherCenter/index.html');
         exit;
     }
