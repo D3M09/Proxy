@@ -1,1 +1,1 @@
-web: vendor/bin/heroku-php-apache2 -C nginx.conf Proxy/
+web: cd Proxy && php -S 0.0.0.0:$PORT router.php
