@@ -1,0 +1,9 @@
+[
+    {
+        "id": 1,
+        "username": "admin",
+        "pass_hash": "$2y$10$zuEGwzAo61bfO8ceTwpbS.9DLtxkuDRg45fX739vhy5bP5a9Jixmu",
+        "role": "owner",
+        "created": "2026-09-17T03:11:02+02:00"
+    }
+]

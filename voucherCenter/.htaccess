@@ -1,0 +1,8 @@
+# Serve the branded voucher center page and hide the directory listing.
+DirectoryIndex index.php index.html
+Options -Indexes
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    # Always run the branding wrapper, even if index.html is requested directly.
+    RewriteRule ^index\.html$ index.php [L]
+</IfModule>

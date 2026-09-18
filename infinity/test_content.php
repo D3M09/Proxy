@@ -1,0 +1,20 @@
+<?php
+$ftp = ftp_connect('ftpupload.net', 21);
+ftp_login($ftp, 'if0_42944398', 'dXxrecJDQMIYsC3');
+ftp_pasv($ftp, true);
+$tmpFile = tempnam(sys_get_temp_dir(), 'ftp_');
+$fp = fopen($tmpFile, 'w');
+ftp_fget($ftp, $fp, '/htdocs/Proxy/cache/mobile/mc/memberCenter.38cabcf7.js', FTP_BINARY);
+fclose($fp);
+$data = file_get_contents($tmpFile);
+echo 'Size:' . strlen($data) . "\n";
+echo 'affiliateRedirect:' . (strpos($data, 'affiliateRedirect') !== false ? 'YES' : 'NO') . "\n";
+echo '3===:' . (strpos($data, '3===') !== false ? 'YES' : 'NO') . "\n";
+$ch = curl_init('https://www.1333bet.ai/mobile/mc/memberCenter.38cabcf7.js');
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+$up = curl_exec($ch);
+echo 'Upstream:' . strlen($up) . "\n";
+echo 'Up first 100:' . substr($up, 0, 100) . "\n";
+unlink($tmpFile);
+ftp_close($ftp);

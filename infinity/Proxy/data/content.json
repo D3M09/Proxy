@@ -1,0 +1,199 @@
+{
+    "banners": [
+        {
+            "image": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS-zB5rNPDzU9-QoGW0NqxEmeGEWpwg8Xuk-1At3tgRXw&s=10",
+            "link": "https://images.3820949.com/mcs-images/announcement/ckb2bdts2/1780075471227_default_mobile.gif",
+            "title": "FFF",
+            "active": true
+        }
+    ],
+    "marquee": {
+        "enabled": true,
+        "items": [
+            {
+                "text": "‼️ প্রতিদিনের লাকী সময়ে আমরা ভিআইপি সদস্যদের নির্দেশনা দিয়ে থাকি           💰 নতুন ইউজার একাউন্ট করলেই ১০০৳ পুরস্কার ⛓️‍💥              🎉 একজন বন্ধুকে আমন্ত্রণ করলেই ৩০০৳ পুরস্কার🎊",
+                "link": ""
+            }
+        ],
+        "text": "‼️ প্রতিদিনের লাকী সময়ে আমরা ভিআইপি সদস্যদের নির্দেশনা দিয়ে থাকি           💰 নতুন ইউজার একাউন্ট করলেই ১০০৳ পুরস্কার ⛓️‍💥              🎉 একজন বন্ধুকে আমন্ত্রণ করলেই ৩০০৳ পুরস্কার🎊",
+        "bg": "#111827",
+        "color": "#ffffff",
+        "speed": 20,
+        "link": ""
+    },
+    "titles": {
+        "web_title": "LottoGames - একাউন্ট করলেই ১০০৳ বোনাস!",
+        "mobile_title": "LottoGames - একাউন্ট করলেই ১০০৳ বোনাস!",
+        "app_name": "LottoGames"
+    },
+    "logo": {
+        "url": "https://upload.wikimedia.org/wikipedia/commons/4/44/Lotto-logo-Performance.png?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=original",
+        "width": 200
+    },
+    "favicon": {
+        "url": "https://cdn.iconscout.com/icon/free/png-256/free-lotto-logo-icon-svg-download-png-2854264.png"
+    },
+    "voucher": {
+        "enabled": true,
+        "path": "/m/voucherCenter",
+        "redirect_url": "/voucherCenter/",
+        "logo": "",
+        "amounts": [
+            100,
+            250,
+            500
+        ],
+        "methods": {
+            "NAGAD": {
+                "name": "Nagad",
+                "image": "",
+                "enabled": true,
+                "min": 50,
+                "max": 9999,
+                "channels": [
+                    {
+                        "label": "চ্যানেল 3",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 1",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 75",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 86",
+                        "enabled": true
+                    }
+                ]
+            },
+            "BKASH": {
+                "name": "Bkash",
+                "image": "",
+                "enabled": true,
+                "min": 100,
+                "max": 30000,
+                "channels": [
+                    {
+                        "label": "চ্যানেল 3",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 1",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 75",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 86",
+                        "enabled": true
+                    }
+                ]
+            },
+            "BKASHSM": {
+                "name": "Send Money Bkash",
+                "image": "",
+                "enabled": true,
+                "min": 100,
+                "max": 30000,
+                "channels": [
+                    {
+                        "label": "চ্যানেল 3",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 1",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 75",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 86",
+                        "enabled": true
+                    }
+                ]
+            },
+            "NAGADSM": {
+                "name": "Send Money Nagad",
+                "image": "",
+                "enabled": true,
+                "min": 100,
+                "max": 30000,
+                "channels": [
+                    {
+                        "label": "চ্যানেল 3",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 1",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 75",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 86",
+                        "enabled": true
+                    }
+                ]
+            },
+            "USDT": {
+                "name": "USDT",
+                "image": "",
+                "enabled": true,
+                "min": 100,
+                "max": 30000,
+                "channels": [
+                    {
+                        "label": "চ্যানেল 3",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 1",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 75",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 86",
+                        "enabled": true
+                    }
+                ]
+            },
+            "ROCKET": {
+                "name": "Rocket",
+                "image": "",
+                "enabled": true,
+                "min": 100,
+                "max": 30000,
+                "channels": [
+                    {
+                        "label": "চ্যানেল 3",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 1",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 75",
+                        "enabled": true
+                    },
+                    {
+                        "label": "চ্যানেল 86",
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    }
+}
