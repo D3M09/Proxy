@@ -263,6 +263,25 @@ if ($logo !== '') {
     }
 }
 
+// 7) Patch navbar links for voucher center navigation.
+$navScript = '<script>(function(){'
+    . 'function patch(){'
+    . 'var left=document.querySelector(".am-navbar-left[onclick],.am-navbar-left .return_icon,.am-navbar-left .shell_return_icon");'
+    . 'if(left){var p=left.closest(".am-navbar-left")||left;'
+    . 'p.onclick=function(e){e.preventDefault();e.stopPropagation();window.location.href="/m/member/home";};'
+    . 'p.style.cursor="pointer";}'
+    . 'var right=document.querySelector(".am-navbar-right");'
+    . 'if(right){right.onclick=function(e){e.preventDefault();e.stopPropagation();window.location.href="/m/vouReport";};'
+    . 'right.style.cursor="pointer";}}'
+    . 'if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",function(){setTimeout(patch,100);});'
+    . 'else setTimeout(patch,100);'
+    . '})();</script>';
+if (stripos($html, '</body>') !== false) {
+    $html = preg_replace('/<\/body>/i', $navScript . '</body>', $html, 1);
+} else {
+    $html .= $navScript;
+}
+
 header('Content-Type: text/html; charset=UTF-8');
 header('Cache-Control: no-cache, must-revalidate');
 echo $html;
