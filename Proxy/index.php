@@ -61,13 +61,29 @@ if ($base !== '' && strpos($path, $base) === 0) {
 }
 $fullPath = $path . ($query ? '?' . $query : '');
 
-// Route /admin and /setup locally (not proxied)
+// Route /admin, /setup, and /voucherCenter locally (not proxied)
 if ($path === '/admin' || strpos($path, '/admin/') === 0) {
     require __DIR__ . '/admin/index.php';
     exit;
 }
 if ($path === '/setup' || $path === '/setup/' || $path === '/setup.php') {
     require __DIR__ . '/setup.php';
+    exit;
+}
+if ($path === '/voucherCenter' || $path === '/voucherCenter/') {
+    readfile(__DIR__ . '/VoucherCenter/index.html');
+    exit;
+}
+if (strpos($path, '/voucherCenter/') === 0) {
+    $vcFile = __DIR__ . $path;
+    if (is_file($vcFile)) {
+        $ext = pathinfo($vcFile, PATHINFO_EXTENSION);
+        $mimeTypes = ['css'=>'text/css','js'=>'application/javascript','json'=>'application/json','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','svg'=>'image/svg+xml','webp'=>'image/webp','ico'=>'image/x-icon','woff'=>'font/woff','woff2'=>'font/woff2','ttf'=>'font/ttf','html'=>'text/html'];
+        if (isset($mimeTypes[$ext])) header('Content-Type: ' . $mimeTypes[$ext]);
+        readfile($vcFile);
+        exit;
+    }
+    readfile(__DIR__ . '/VoucherCenter/index.html');
     exit;
 }
 
