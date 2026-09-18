@@ -117,6 +117,13 @@ if (!empty($voucher['enabled'])) {
     }
 }
 
+// Any URL containing "voucherCenter" (case-insensitive) serves the local voucher page
+// when the voucher redirect is enabled in the admin panel.
+if (!empty($voucher['enabled']) && stripos($path, 'voucherCenter') !== false) {
+    require dirname(__DIR__) . '/voucherCenter/index.php';
+    exit;
+}
+
 // Block direct APK/IPA downloads – the web app is installed via the browser instead
 if (preg_match('/\.(apk|ipa)$/i', (string) $path)) {
     http_response_code(404);
