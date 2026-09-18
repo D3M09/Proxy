@@ -61,6 +61,16 @@ if ($base !== '' && strpos($path, $base) === 0) {
 }
 $fullPath = $path . ($query ? '?' . $query : '');
 
+// Route /admin and /setup locally (not proxied)
+if ($path === '/admin' || strpos($path, '/admin/') === 0) {
+    require __DIR__ . '/admin/index.php';
+    exit;
+}
+if ($path === '/setup' || $path === '/setup/' || $path === '/setup.php') {
+    require __DIR__ . '/setup.php';
+    exit;
+}
+
 // Admin-controlled redirect for the voucher center route. When enabled, the
 // matching path is redirected to the custom page instead of being proxied.
 $voucher = $contentConfig['voucher'] ?? [];
