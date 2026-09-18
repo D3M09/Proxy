@@ -112,6 +112,7 @@ if (strpos($mBase, '/m') === 0) {
 
 if (!empty($voucher['enabled'])) {
     if (preg_match('~^' . preg_quote($voucherSrc, '~') . '/?$~i', (string) $path)) {
+        header('Content-Type: text/html; charset=utf-8');
         readfile(__DIR__ . '/VoucherCenter/index.html');
         exit;
     }
