@@ -18,7 +18,7 @@ if ($uri !== '/' && is_file(__DIR__ . $uri)) {
         'woff' => 'font/woff',
         'woff2' => 'font/woff2',
         'ttf' => 'font/ttf',
-        'html' => 'text/html',
+        'html' => 'text/html; charset=utf-8',
     ];
     if (isset($mimeTypes[$ext])) {
         header('Content-Type: ' . $mimeTypes[$ext]);

@@ -3,6 +3,7 @@
  * Reverse Proxy. Settings live in config.php (created by the setup installer).
  * Caches upstream resources locally under cache/ directory.
  */
+header('Content-Type: text/html; charset=utf-8');
 
 $configFile = __DIR__ . '/config.php';
 if (!is_file($configFile)) {
@@ -101,7 +102,7 @@ if (strpos($mBase, '/m') === 0) {
         $vcFile = __DIR__ . '/VoucherCenter' . $mSub;
         if (is_file($vcFile)) {
             $ext = pathinfo($vcFile, PATHINFO_EXTENSION);
-            $mimeTypes = ['css'=>'text/css','js'=>'application/javascript','json'=>'application/json','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','svg'=>'image/svg+xml','webp'=>'image/webp','ico'=>'image/x-icon','woff'=>'font/woff','woff2'=>'font/woff2','ttf'=>'font/ttf','html'=>'text/html'];
+            $mimeTypes = ['css'=>'text/css; charset=utf-8','js'=>'application/javascript; charset=utf-8','json'=>'application/json; charset=utf-8','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','svg'=>'image/svg+xml','webp'=>'image/webp','ico'=>'image/x-icon','woff'=>'font/woff','woff2'=>'font/woff2','ttf'=>'font/ttf','html'=>'text/html; charset=utf-8'];
             if (isset($mimeTypes[$ext])) header('Content-Type: ' . $mimeTypes[$ext]);
             readfile($vcFile);
             exit;
