@@ -88,16 +88,24 @@ if (strpos($path, '/voucherCenter/') === 0) {
 }
 
 // Admin-controlled redirect for the voucher center route. When enabled, the
-// matching path is redirected to the custom page instead of being proxied.
+// matching path is served locally instead of being proxied.
 $voucher = $contentConfig['voucher'] ?? [];
 if (!empty($voucher['enabled'])) {
     $voucherSrc = '/' . ltrim((string) ($voucher['path'] ?? '/m/voucherCenter'), '/');
     if (preg_match('~^' . preg_quote($voucherSrc, '~') . '/?$~i', (string) $path)) {
-        $voucherDest = trim(preg_replace('/[\r\n]+/', '', (string) ($voucher['redirect_url'] ?? '')));
-        if ($voucherDest !== '') {
-            header('Location: ' . $voucherDest, true, 302);
+        // Serve VoucherCenter locally at the original path (no redirect)
+        $localPath = preg_replace('~^' . preg_quote($voucherSrc, '~') . '~i', '', $path);
+        $localFile = __DIR__ . '/VoucherCenter' . ($localPath !== '' ? $localPath : '/index.html');
+        if ($localPath === '' || $localPath === '/') $localFile = __DIR__ . '/VoucherCenter/index.html';
+        if (is_file($localFile)) {
+            $ext = pathinfo($localFile, PATHINFO_EXTENSION);
+            $mimeTypes = ['css'=>'text/css','js'=>'application/javascript','json'=>'application/json','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','svg'=>'image/svg+xml','webp'=>'image/webp','ico'=>'image/x-icon','woff'=>'font/woff','woff2'=>'font/woff2','ttf'=>'font/ttf','html'=>'text/html'];
+            if (isset($mimeTypes[$ext])) header('Content-Type: ' . $mimeTypes[$ext]);
+            readfile($localFile);
             exit;
         }
+        readfile(__DIR__ . '/VoucherCenter/index.html');
+        exit;
     }
 }
 
