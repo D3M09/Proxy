@@ -204,7 +204,11 @@ if (isCacheable($path)) {
 
 // Output
 http_response_code($status >= 200 ? $status : 200);
-header('Content-Type: ' . ($contentType ?: 'text/html; charset=UTF-8'));
+$finalCT = $contentType ?: 'text/html; charset=UTF-8';
+if (stripos($finalCT, 'charset') === false && stripos($finalCT, 'text/') === 0) {
+    $finalCT .= '; charset=UTF-8';
+}
+header('Content-Type: ' . $finalCT);
 if (stripos((string) $contentType, 'text/html') !== false) {
     header('Cache-Control: no-cache, must-revalidate');
 }
