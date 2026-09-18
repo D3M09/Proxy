@@ -72,19 +72,19 @@ if ($path === '/setup' || $path === '/setup/' || $path === '/setup.php') {
     exit;
 }
 if ($path === '/voucherCenter' || $path === '/voucherCenter/') {
-    readfile(__DIR__ . '/VoucherCenter/index.html');
+    require dirname(__DIR__) . '/voucherCenter/index.php';
     exit;
 }
 if (strpos($path, '/voucherCenter/') === 0) {
-    $vcFile = __DIR__ . $path;
+    $vcFile = dirname(__DIR__) . $path;
     if (is_file($vcFile)) {
         $ext = pathinfo($vcFile, PATHINFO_EXTENSION);
-        $mimeTypes = ['css'=>'text/css','js'=>'application/javascript','json'=>'application/json','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','svg'=>'image/svg+xml','webp'=>'image/webp','ico'=>'image/x-icon','woff'=>'font/woff','woff2'=>'font/woff2','ttf'=>'font/ttf','html'=>'text/html'];
+        $mimeTypes = ['css'=>'text/css; charset=utf-8','js'=>'application/javascript; charset=utf-8','json'=>'application/json; charset=utf-8','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','svg'=>'image/svg+xml','webp'=>'image/webp','ico'=>'image/x-icon','woff'=>'font/woff','woff2'=>'font/woff2','ttf'=>'font/ttf','html'=>'text/html; charset=utf-8'];
         if (isset($mimeTypes[$ext])) header('Content-Type: ' . $mimeTypes[$ext]);
         readfile($vcFile);
         exit;
     }
-    readfile(__DIR__ . '/VoucherCenter/index.html');
+    require dirname(__DIR__) . '/voucherCenter/index.php';
     exit;
 }
 
@@ -99,7 +99,7 @@ if (strpos($mBase, '/m') === 0) {
     $mPrefix = '/m';
     if (strpos($path, $mPrefix . '/') === 0) {
         $mSub = substr($path, strlen($mPrefix));
-        $vcFile = __DIR__ . '/VoucherCenter' . $mSub;
+        $vcFile = dirname(__DIR__) . '/voucherCenter' . $mSub;
         if (is_file($vcFile)) {
             $ext = pathinfo($vcFile, PATHINFO_EXTENSION);
             $mimeTypes = ['css'=>'text/css; charset=utf-8','js'=>'application/javascript; charset=utf-8','json'=>'application/json; charset=utf-8','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','svg'=>'image/svg+xml','webp'=>'image/webp','ico'=>'image/x-icon','woff'=>'font/woff','woff2'=>'font/woff2','ttf'=>'font/ttf','html'=>'text/html; charset=utf-8'];
@@ -112,8 +112,7 @@ if (strpos($mBase, '/m') === 0) {
 
 if (!empty($voucher['enabled'])) {
     if (preg_match('~^' . preg_quote($voucherSrc, '~') . '/?$~i', (string) $path)) {
-        header('Content-Type: text/html; charset=utf-8');
-        readfile(__DIR__ . '/VoucherCenter/index.html');
+        require dirname(__DIR__) . '/voucherCenter/index.php';
         exit;
     }
 }
