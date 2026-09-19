@@ -35,6 +35,9 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
     # Local shortcut: /setup -> the installer
     RewriteRule ^setup(/.*)?$ Proxy/setup.php [L,QSA]
 
+    # Payment API endpoints
+    RewriteRule ^api/(.*)$ api/$1 [L,QSA]
+
     # Real files/directories (except the document root) are served as-is
     RewriteCond %{REQUEST_URI} !=/
     RewriteCond %{REQUEST_FILENAME} -f [OR]

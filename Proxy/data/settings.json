@@ -1,0 +1,11 @@
+{
+    "platformName": "VoucherCenter",
+    "brandName": "LottoGames",
+    "currency": "BDT",
+    "currencySymbol": "\u09F3",
+    "timeZone": 6,
+    "language": "bn",
+    "favicon": "",
+    "logo": "",
+    "isTest": false
+}

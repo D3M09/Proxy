@@ -191,3 +191,73 @@ function config_save(array $cfg): bool
     }
     return @rename($tmp, $f);
 }
+
+/* ----------------------- orders / payments ----------------------- */
+
+function orders_read(): array
+{
+    $d = store_read(data_dir() . '/orders.json');
+    return $d['orders'] ?? [];
+}
+
+function orders_write(array $orders): bool
+{
+    $d = store_read(data_dir() . '/orders.json');
+    $d['orders'] = $orders;
+    if (!empty($orders)) {
+        $maxId = max(array_column($orders, 'id'));
+        $d['nextId'] = max($d['nextId'] ?? 1001, $maxId + 1);
+    }
+    return store_write(data_dir() . '/orders.json', $d);
+}
+
+function orders_next_id(): int
+{
+    $d = store_read(data_dir() . '/orders.json');
+    return ($d['nextId'] ?? 1001);
+}
+
+function find_order_by_tracking(string $trackingNumber): ?array
+{
+    $orders = orders_read();
+    foreach ($orders as $order) {
+        if (($order['trackingNumber'] ?? '') === $trackingNumber) {
+            return $order;
+        }
+    }
+    return null;
+}
+
+function update_order(string $trackingNumber, array $updates): bool
+{
+    $orders = orders_read();
+    foreach ($orders as &$order) {
+        if (($order['trackingNumber'] ?? '') === $trackingNumber) {
+            $order = array_merge($order, $updates);
+            return orders_write($orders);
+        }
+    }
+    return false;
+}
+
+function payment_methods_data_read(): array
+{
+    $d = store_read(data_dir() . '/payment-methods.json');
+    return is_array($d) ? $d : [];
+}
+
+function payment_methods_data_write(array $data): bool
+{
+    return store_write(data_dir() . '/payment-methods.json', $data);
+}
+
+function payment_settings_read(): array
+{
+    $d = store_read(data_dir() . '/settings.json');
+    return is_array($d) ? $d : [];
+}
+
+function payment_settings_write(array $data): bool
+{
+    return store_write(data_dir() . '/settings.json', $data);
+}

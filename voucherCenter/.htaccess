@@ -5,4 +5,5 @@ Options -Indexes
     RewriteEngine On
     # Always run the branding wrapper, even if index.html is requested directly.
     RewriteRule ^index\.html$ index.php [L]
+    # payment.php is served directly (no rewrite).
 </IfModule>

@@ -1,0 +1,147 @@
+{
+    "methods": {
+        "BKASH": {
+            "name": "bKash",
+            "enabled": true,
+            "color": "#E2136E",
+            "logo": "",
+            "accounts": [
+                {
+                    "number": "01864679167",
+                    "name": "Demo Merchant",
+                    "enabled": true,
+                    "channels": [
+                        {
+                            "name": "Personal",
+                            "enabled": true,
+                            "min": 100,
+                            "max": 30000
+                        }
+                    ]
+                }
+            ]
+        },
+        "BKASHSM": {
+            "name": "bKash Send Money",
+            "enabled": true,
+            "color": "#E2136E",
+            "logo": "",
+            "accounts": [
+                {
+                    "number": "01629969438",
+                    "name": "Demo Merchant SM",
+                    "enabled": true,
+                    "channels": [
+                        {
+                            "name": "Send Money",
+                            "enabled": true,
+                            "min": 100,
+                            "max": 30000
+                        }
+                    ]
+                }
+            ]
+        },
+        "NAGAD": {
+            "name": "Nagad",
+            "enabled": true,
+            "color": "#F6921E",
+            "logo": "",
+            "accounts": [
+                {
+                    "number": "01817122660",
+                    "name": "Demo Merchant Nagad",
+                    "enabled": true,
+                    "channels": [
+                        {
+                            "name": "Personal",
+                            "enabled": true,
+                            "min": 100,
+                            "max": 30000
+                        },
+                        {
+                            "name": "Send Money",
+                            "enabled": true,
+                            "min": 100,
+                            "max": 30000
+                        }
+                    ]
+                }
+            ]
+        },
+        "NAGADSM": {
+            "name": "Nagad Send Money",
+            "enabled": true,
+            "color": "#F6921E",
+            "logo": "",
+            "accounts": [
+                {
+                    "number": "01817122660",
+                    "name": "Demo Merchant Nagad SM",
+                    "enabled": true,
+                    "channels": [
+                        {
+                            "name": "Send Money",
+                            "enabled": true,
+                            "min": 100,
+                            "max": 30000
+                        }
+                    ]
+                }
+            ]
+        },
+        "ROCKET": {
+            "name": "Rocket",
+            "enabled": true,
+            "color": "#873191",
+            "logo": "",
+            "accounts": [
+                {
+                    "number": "01996681890",
+                    "name": "Demo Merchant Rocket",
+                    "enabled": true,
+                    "channels": [
+                        {
+                            "name": "Personal",
+                            "enabled": true,
+                            "min": 100,
+                            "max": 30000
+                        }
+                    ]
+                }
+            ]
+        },
+        "USDT": {
+            "name": "USDT",
+            "enabled": true,
+            "color": "#26A17B",
+            "logo": "",
+            "accounts": [
+                {
+                    "number": "TN3VnM9xPz7kR4tY2wQbLcEhUaDfSgJm",
+                    "name": "Demo USDT Wallet",
+                    "enabled": true,
+                    "channels": [
+                        {
+                            "name": "TRC20",
+                            "enabled": true,
+                            "min": 500,
+                            "max": 100000
+                        }
+                    ]
+                }
+            ]
+        }
+    },
+    "amounts": [
+        100,
+        200,
+        300,
+        500,
+        1000,
+        3000,
+        5000,
+        10000,
+        30000
+    ]
+}

@@ -1,19 +1,14 @@
 <?php
 /**
- * Serves the saved voucher-center page with the admin-managed configuration
- * applied: brand text, title, favicon, logo, payment methods/channels and the
- * amount options. The original markup is kept untouched in index.html.
+ * Serves the voucher-center page with payment-methods data from the
+ * admin-managed payment-methods.json and settings.json.
  */
 
-$proxyDir = dirname(__DIR__) . '/Proxy';
+require_once __DIR__ . '/../Proxy/admin/store.php';
+require_once __DIR__ . '/../Proxy/admin/includes/functions.php';
 
-$app = @include $proxyDir . '/config.php';
-$app = is_array($app) ? $app : [];
-$brandFrom = (string) ($app['brand_from'] ?? '');
-$brandTo   = (string) ($app['brand_to'] ?? '');
-
-require_once $proxyDir . '/admin/store.php';
-$content = content_load();
+$settings = payment_settings_read();
+$brandTo = (string) ($settings['brandName'] ?? '');
 
 $html = @file_get_contents(__DIR__ . '/index.html');
 if ($html === false) {
@@ -29,46 +24,26 @@ $jenc = function ($v) use ($jflags) {
     return json_encode($v, $jflags);
 };
 
-// 0) The saved markup points at a stale "/Vcentere/" base; the image folders
-//    live next to this script.
 $vcBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/voucherCenter/index.php')), '/');
 if ($vcBase === '' || $vcBase === '.') {
     $vcBase = '/voucherCenter';
 }
+
 $html = str_replace('/Vcentere/', $vcBase . '/', $html);
 
-// 1) Replace legacy brand text (the page was saved from another whitelabel).
 $legacyBrands = ['BigAceWin'];
-if ($brandFrom !== '') {
-    $legacyBrands[] = $brandFrom;
-}
 if ($brandTo !== '') {
     foreach (array_unique($legacyBrands) as $from) {
-        if ($from === '' || strcasecmp($from, $brandTo) === 0) {
-            continue;
-        }
+        if ($from === '' || strcasecmp($from, $brandTo) === 0) continue;
         $html = preg_replace('/(?<![\w.\/-])' . preg_quote($from, '/') . '(?!\.[a-z])/i', $brandTo, $html);
     }
 }
 
-// 2) Title / meta title from the admin panel.
-$titles   = $content['titles'] ?? [];
-$webTitle = trim((string) ($titles['web_title'] ?? ''));
-if ($webTitle !== '') {
-    $tEsc = htmlspecialchars($webTitle, ENT_QUOTES);
-    $html = preg_replace('/<title>.*?<\/title>/is', '<title>' . $tEsc . '</title>', $html, 1);
-    foreach (['name="title"', 'property="og:title"', 'name="twitter:title"'] as $attr) {
-        $html = preg_replace(
-            '/<meta\s+' . preg_quote($attr, '/') . '\s+content="[^"]*"[^>]*>/i',
-            '<meta ' . $attr . ' content="' . $tEsc . '">',
-            $html,
-            1
-        );
-    }
-}
+$platformName = $settings['platformName'] ?? 'VoucherCenter';
+$tEsc = htmlspecialchars($platformName, ENT_QUOTES);
+$html = preg_replace('/<title>.*?<\/title>/is', '<title>' . $tEsc . '</title>', $html, 1);
 
-// 3) Favicon from the admin panel (replaces the upstream/default icons).
-$favicon = trim((string) ($content['favicon']['url'] ?? ''));
+$favicon = trim((string) ($settings['favicon'] ?? ''));
 if ($favicon !== '') {
     $fEsc = htmlspecialchars($favicon, ENT_QUOTES);
     $html = preg_replace_callback('/<link\b[^>]*\brel="[^"]*icon[^"]*"[^>]*>/i', function ($m) use ($fEsc) {
@@ -80,13 +55,10 @@ if ($favicon !== '') {
     }, $html);
 }
 
-// ---------------------------------------------------------------------------
-// 4) Voucher page content: payment methods, channels, amounts (admin-driven).
-// ---------------------------------------------------------------------------
-$vc        = is_array($content['voucher'] ?? null) ? $content['voucher'] : [];
-$methodDef = voucher_method_defaults();
+$pmData = payment_methods_data_read();
+$methodsIn = $pmData['methods'] ?? [];
+$amountsRaw = $pmData['amounts'] ?? [];
 
-// Built-in image locations for each method (used when admin leaves image blank).
 $methodImages = [
     'NAGAD'   => $vcBase . '/NAGAD/BN_2_20240312230148421.png',
     'BKASH'   => $vcBase . '/BKASH/BN_2_20240312225413337.png',
@@ -96,22 +68,45 @@ $methodImages = [
     'ROCKET'  => $vcBase . '/ROCKET/BN_2_20240312230029166.png',
 ];
 
-$images    = [];
-$names     = [];
+$images = [];
+$names = [];
 $methodCfg = [];
-$methodsIn = is_array($vc['methods'] ?? null) ? $vc['methods'] : [];
-foreach ($methodDef as $key => $def) {
-    $m       = is_array($methodsIn[$key] ?? null) ? $methodsIn[$key] : [];
-    $name    = trim((string) ($m['name'] ?? '')) !== '' ? (string) $m['name'] : (string) $def['name'];
-    $image   = trim((string) ($m['image'] ?? '')) !== '' ? (string) $m['image'] : ($methodImages[$key] ?? '');
-    $enabled = array_key_exists('enabled', $m) ? (bool) $m['enabled'] : true;
-    $images[$key]    = $image;
-    $names[$key]     = $name;
+$channelsByMethod = [];
+
+foreach ($methodsIn as $key => $m) {
+    $name = trim((string) ($m['name'] ?? '')) !== '' ? (string) $m['name'] : $key;
+    $image = $methodImages[$key] ?? '';
+    $enabled = (bool) ($m['enabled'] ?? true);
+    $color = trim((string) ($m['color'] ?? ''));
+    $images[$key] = $image;
+    $names[$key] = $name;
     $methodCfg[$key] = [
         'enabled' => $enabled,
-        'min'     => (int) ($m['min'] ?? 0),
-        'max'     => (int) ($m['max'] ?? 0),
+        'color'   => $color,
     ];
+
+    $clean = [];
+    foreach (($m['accounts'] ?? []) as $acc) {
+        if (!($acc['enabled'] ?? true)) continue;
+        foreach (($acc['channels'] ?? []) as $ch) {
+            if (!($ch['enabled'] ?? true)) continue;
+            $label = trim((string) ($ch['name'] ?? ''));
+            if ($label === '') continue;
+            $min = (int) ($ch['min'] ?? 100);
+            $max = (int) ($ch['max'] ?? 30000);
+            $exists = false;
+            foreach ($clean as $c) {
+                if ($c['label'] === $label) { $exists = true; break; }
+            }
+            if (!$exists) {
+                $clean[] = ['label' => $label, 'enabled' => true, 'min' => $min, 'max' => $max];
+            }
+        }
+    }
+    if (!$clean) {
+        $clean = [['label' => 'Personal', 'enabled' => true, 'min' => 100, 'max' => 30000]];
+    }
+    $channelsByMethod[$key] = $clean;
 }
 
 $html = preg_replace_callback(
@@ -119,48 +114,40 @@ $html = preg_replace_callback(
     function () use ($images, $jenc) {
         return 'var paymentImages = ' . $jenc($images) . ';';
     },
-    $html,
-    1
+    $html, 1
 );
+
 $html = preg_replace_callback(
     '/var names = \{[^}]*\};/',
     function () use ($names, $jenc) {
         return 'var names = ' . $jenc($names) . ';';
     },
-    $html,
-    1
+    $html, 1
 );
+
 $html = preg_replace_callback(
     '/try \{ adminConfig = JSON\.parse\(localStorage\.getItem\(\'voucherPaymentConfig\'\)\) \|\| \{\}; \} catch \(e\) \{ adminConfig = \{\}; \}/',
     function () use ($methodCfg, $jenc) {
         return 'adminConfig = ' . $jenc($methodCfg) . ';';
     },
-    $html,
-    1
+    $html, 1
 );
 
-// The Rocket item is injected by the page itself; rebuild it with the admin
-// name and the same label markup the other methods use.
-$rocketName = (string) ($names['ROCKET'] ?? 'Rocket');
-$rocketJs   = str_replace(['\\', "'"], ['\\\\', "\\'"], $rocketName);
-$rocketHtml = '<div class="deposit-icon-bg"><div class="deposit-img-new"><img alt="' . $rocketJs . '"></div></div>'
-    . '<div class="desc-content"><div class="desc-info"><div class="vcn-list-text"><p>' . $rocketJs . '</p></div></div></div>';
+$rocketName = str_replace(['\\', "'"], ['\\\\', "\\'"], $names['ROCKET'] ?? 'Rocket');
+$rocketHtml = '<div class="deposit-icon-bg"><div class="deposit-img-new"><img alt="' . $rocketName . '"></div></div>'
+    . '<div class="desc-content"><div class="desc-info"><div class="vcn-list-text"><p>' . $rocketName . '</p></div></div></div>';
 $html = preg_replace_callback(
     '/rocket\.innerHTML = \'[^\']*\';/',
     function () use ($rocketHtml) {
         return "rocket.innerHTML = '" . $rocketHtml . "';";
     },
-    $html,
-    1
+    $html, 1
 );
 
-// Amount options.
 $amounts = [];
-foreach ((array) ($vc['amounts'] ?? []) as $a) {
+foreach ($amountsRaw as $a) {
     $n = (int) preg_replace('/[^\d]/', '', (string) $a);
-    if ($n > 0) {
-        $amounts[] = $n;
-    }
+    if ($n > 0) $amounts[] = $n;
 }
 if (!$amounts) {
     $amounts = [100, 200, 300, 500, 1000, 3000, 5000, 10000, 30000];
@@ -174,39 +161,17 @@ $html = preg_replace_callback(
     function ($m) use ($amountItems) {
         return $m[1] . $amountItems . $m[2];
     },
-    $html,
-    1
+    $html, 1
 );
 
-// Payment channels (each method has its own list).
-$channelsByMethod = [];
-foreach ($methodDef as $key => $def) {
-    $list = is_array($methodsIn[$key]['channels'] ?? null) ? $methodsIn[$key]['channels'] : voucher_channel_defaults();
-    $clean = [];
-    foreach ($list as $ch) {
-        $label = trim((string) ($ch['label'] ?? ''));
-        if ($label === '') {
-            continue;
-        }
-        $clean[] = ['label' => $label, 'enabled' => !array_key_exists('enabled', $ch) || (bool) $ch['enabled']];
-    }
-    if (!$clean) {
-        $clean = voucher_channel_defaults();
-    }
-    $channelsByMethod[$key] = $clean;
-}
-
-// Static fallback list (first method) for pre-hydration / no-JS.
-$firstKey     = array_key_first($methodDef);
-$chItems      = '';
+$firstKey = array_key_first($channelsByMethod) ?: 'BKASH';
+$chItems = '';
 $firstEnabled = true;
 foreach (($channelsByMethod[$firstKey] ?? []) as $ch) {
     $enabled = $ch['enabled'];
-    $cls     = ($enabled && $firstEnabled) ? 'ck ' : ' ';
-    if ($enabled) {
-        $firstEnabled = false;
-    }
-    $style    = $enabled ? '' : ' style="display:none"';
+    $cls = ($enabled && $firstEnabled) ? 'ck ' : ' ';
+    if ($enabled) $firstEnabled = false;
+    $style = $enabled ? '' : ' style="display:none"';
     $chItems .= '<li class="' . $cls . '"' . $style . '><span class="method-list-info">'
         . htmlspecialchars($ch['label'], ENT_QUOTES) . '</span></li>';
 }
@@ -215,11 +180,9 @@ $html = preg_replace_callback(
     function ($m) use ($chItems) {
         return $m[1] . $chItems . $m[2];
     },
-    $html,
-    1
+    $html, 1
 );
 
-// Runtime controller: swap the channel list to the selected method's channels.
 $chScript = '<script>(function(){var CH=' . $jenc($channelsByMethod) . ';'
     . 'function keyOf(li){for(var k in CH){if(li&&li.classList&&li.classList.contains(k))return k;}return null;}'
     . 'function tpl(){return document.querySelector("svg.deposit-list-ck");}'
@@ -232,54 +195,42 @@ $chScript = '<script>(function(){var CH=' . $jenc($channelsByMethod) . ';'
     . 'function boot(){var ms=document.querySelectorAll("li.change-item-animate");for(var i=0;i<ms.length;i++){(function(li){li.addEventListener("click",function(){var k=keyOf(li);if(k)setTimeout(function(){render(k);},0);});})(ms[i]);}var sel=document.querySelector("li.change-item-animate.selected")||ms[0];if(sel){var k=keyOf(sel);if(k)render(k);}}'
     . 'if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",function(){setTimeout(boot,0);});else setTimeout(boot,0);'
     . '})();</script>';
-if (stripos($html, '</body>') !== false) {
-    $html = preg_replace('/<\/body>/i', $chScript . '</body>', $html, 1);
-} else {
-    $html .= $chScript;
-}
+$html = preg_replace('/<\/body>/i', $chScript . '</body>', $html, 1);
 
-// 5) Strip save-page artefacts so no old-brand URLs remain in the markup.
+$apiCreateOrder = '/api/createOrder.php';
+$paymentUrl = $vcBase . '/payment.php';
+$nextJs = '(function(){'
+    . 'var m=window.selectedPaymentMethod,a=window.selectedDepositAmount,c=window.selectedPaymentChannel||"Personal";'
+    . 'if(!m||!a){alert("Please select method and amount");return;}'
+    . 'var btn=document.querySelector(".vc-v2-submit");'
+    . 'if(btn){btn.disabled=true;btn.textContent="Processing...";}'
+    . 'fetch("' . $apiCreateOrder . '",{method:"POST",headers:{"Content-Type":"application/json"},'
+    . 'body:JSON.stringify({method:m,amount:Number(a.replace(/,/g,"")),channel:c})})'
+    . '.then(function(r){return r.json()})'
+    . '.then(function(d){if(d.success&&d.trackingNumber){window.location.href="' . $paymentUrl . '?tracking="+d.trackingNumber;}'
+    . 'else{alert(d.error||"Failed to create order");if(btn){btn.disabled=false;btn.textContent="\u09AA\u09B0\u09AC\u09B0\u09CD\u09A4\u09C0";}}})'
+    . '.catch(function(){alert("Network error. Try again.");if(btn){btn.disabled=false;btn.textContent="\u09AA\u09B0\u09AC\u09B0\u09CD\u09A4\u09C0";}});'
+    . '})();';
+$html = preg_replace(
+    '/window\.location\.href\s*=\s*\x27[^\x27]+\x27\s*\+\s*query\.toString\(\);/',
+    $nextJs . ';',
+    $html, 1
+);
+
 $html = preg_replace('/\sdata-savepage-href="[^"]*"/i', '', $html);
 $html = preg_replace('/<meta\s+name="savepage-[^"]*"[^>]*>/i', '', $html);
+$html = preg_replace('/<meta\s+name="savepage-from"[^>]*>/i', '', $html);
 
-// 6) Logo: swap visible logo images at runtime (voucher logo, else global logo).
-$logo = trim((string) ($vc['logo'] ?? ''));
-if ($logo === '') {
-    $logo = trim((string) ($content['logo']['url'] ?? ''));
-}
+$logo = trim((string) ($settings['logo'] ?? ''));
 if ($logo !== '') {
-    $logoJson   = $jenc($logo);
+    $logoJson = $jenc($logo);
     $logoScript = '<script>(function(){var L=' . $logoJson . ';if(!L)return;'
-        . 'try{document.documentElement.style.setProperty("--s-logo-loading-logo","url("+L+")");}catch(e){}'
         . 'function s(){var im=document.getElementsByTagName("img");for(var i=0;i<im.length;i++){'
         . 'var v=(im[i].getAttribute("src")||"")+" "+(im[i].className||"");'
         . 'if(/logo/i.test(v)&&im[i].src!==L){im[i].src=L;}}}'
         . 'if(document.readyState!=="loading")s();else document.addEventListener("DOMContentLoaded",s);'
         . 'setInterval(s,1500);})();</script>';
-    if (stripos($html, '</body>') !== false) {
-        $html = preg_replace('/<\/body>/i', $logoScript . '</body>', $html, 1);
-    } else {
-        $html .= $logoScript;
-    }
-}
-
-// 7) Patch navbar links for voucher center navigation.
-$navScript = '<script>(function(){'
-    . 'function patch(){'
-    . 'var left=document.querySelector(".am-navbar-left[onclick],.am-navbar-left .return_icon,.am-navbar-left .shell_return_icon");'
-    . 'if(left){var p=left.closest(".am-navbar-left")||left;'
-    . 'p.onclick=function(e){e.preventDefault();e.stopPropagation();window.location.href="/m/member/home";};'
-    . 'p.style.cursor="pointer";}'
-    . 'var right=document.querySelector(".am-navbar-right");'
-    . 'if(right){right.onclick=function(e){e.preventDefault();e.stopPropagation();window.location.href="/m/vouReport";};'
-    . 'right.style.cursor="pointer";}}'
-    . 'if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",function(){setTimeout(patch,100);});'
-    . 'else setTimeout(patch,100);'
-    . '})();</script>';
-if (stripos($html, '</body>') !== false) {
-    $html = preg_replace('/<\/body>/i', $navScript . '</body>', $html, 1);
-} else {
-    $html .= $navScript;
+    $html = preg_replace('/<\/body>/i', $logoScript . '</body>', $html, 1);
 }
 
 header('Content-Type: text/html; charset=UTF-8');

@@ -121,6 +121,9 @@ function admin_icon(string $name): string
         'tools'     => '<path d="M14.7 6.3a4 4 0 00-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 005.4-5.4l-2.6 2.6-2.1-2.1z"/>',
         'favicon'   => '<path d="M12 3l2.6 5.5 6 .8-4.4 4.2 1.1 6L12 16.8 6.7 19.5l1.1-6L3.4 9.3l6-.8z"/>',
         'voucher'   => '<path d="M3 8a2 2 0 012-2h14a2 2 0 012 2v1.5a2.5 2.5 0 000 5V16a2 2 0 01-2 2H5a2 2 0 01-2-2v-1.5a2.5 2.5 0 000-5z"/><path d="M14 6v12"/>',
+        'orders'    => '<path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6"/><path d="M9 16h6"/>',
+        'payment_methods' => '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/>',
+        'payment_settings' => '<circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>',
     ];
     $d = $p[$name] ?? $p['dashboard'];
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' . $d . '</svg>';
@@ -132,6 +135,7 @@ function admin_nav(string $base, string $active): string
         'Overview'   => [['dashboard', 'Dashboard']],
         'Appearance' => [['titles', 'Titles'], ['logo', 'Logo'], ['favicon', 'Favicon'], ['appname', 'App name']],
         'Content'    => [['banners', 'Banners'], ['marquee', 'Marquee'], ['voucher', 'Voucher Center']],
+        'Payments'   => [['orders', 'Orders'], ['payment_methods', 'Pay Methods'], ['payment_settings', 'Pay Settings']],
         'Access'     => [['users', 'Users']],
         'System'     => [['settings', 'Settings'], ['tools', 'Tools']],
     ];
@@ -344,12 +348,26 @@ function admin_render_dashboard(string $base, string $notice = ''): void
     [$files, $bytes] = admin_dir_size(CACHE_DIR);
     $users = users_load();
     $content = content_load();
+    $allOrders = orders_read();
+    $pending = 0;
+    $confirmed = 0;
+    $totalAmount = 0;
+    foreach ($allOrders as $o) {
+        $s = $o['status'] ?? '';
+        if ($s === 'WaitingConfirm') $pending++;
+        elseif ($s === 'Confirmed') {
+            $confirmed++;
+            $totalAmount += (float) ($o['amount'] ?? 0);
+        }
+    }
     $stats = [
         'Upstream' => UPSTREAM !== '' ? UPSTREAM : '—',
         'Brand' => (BRAND_FROM !== '' ? BRAND_FROM . ' → ' : '') . BRAND_TO,
         'Cache' => number_format($files) . ' files · ' . number_format($bytes / 1048576, 2) . ' MB',
         'Admin users' => (string) count($users),
         'Banners' => (string) count($content['banners']),
+        'Orders' => number_format(count($allOrders)) . ' (' . $pending . ' pending)',
+        'Revenue' => number_format($totalAmount),
         'PHP' => PHP_VERSION,
     ];
     $cards = '';
@@ -360,10 +378,11 @@ function admin_render_dashboard(string $base, string $notice = ''): void
     $body = $ok . '<div class="grid">' . $cards . '</div>'
         . '<div class="card" style="margin-top:18px"><h3>Quick actions</h3><div class="desc">Common tasks</div>'
         . '<div class="row">'
+        . '<a class="btn ghost sm" href="' . htmlspecialchars(admin_home_url($base) . '/orders') . '">View orders</a>'
+        . '<a class="btn ghost sm" href="' . htmlspecialchars(admin_home_url($base) . '/payment_methods') . '">Payment methods</a>'
         . '<a class="btn ghost sm" href="' . htmlspecialchars(admin_home_url($base) . '/banners') . '">Manage banners</a>'
-        . '<a class="btn ghost sm" href="' . htmlspecialchars(admin_home_url($base) . '/voucher') . '">Voucher Center redirect</a>'
+        . '<a class="btn ghost sm" href="' . htmlspecialchars(admin_home_url($base) . '/voucher') . '">Voucher Center</a>'
         . '<a class="btn ghost sm" href="' . htmlspecialchars(admin_home_url($base) . '/users') . '">Add admin user</a>'
-        . '<a class="btn ghost sm" href="' . htmlspecialchars(admin_home_url($base) . '/settings') . '">Proxy settings</a>'
         . '<a class="btn ghost sm" href="' . htmlspecialchars(admin_home_url($base) . '/tools') . '">Purge cache</a>'
         . '</div></div>';
     admin_layout($base, 'dashboard', 'Dashboard', $body, $_SESSION['px_user'] ?? '');
@@ -724,6 +743,272 @@ function admin_render_tools(string $base, string $notice = ''): void
     admin_layout($base, 'tools', 'Tools', $body, $_SESSION['px_user'] ?? '');
 }
 
+/* -------------------- payments: orders -------------------- */
+
+function admin_render_orders(string $base, string $notice = ''): void
+{
+    $ok = admin_notice_html($notice);
+    $orders = array_reverse(orders_read());
+    $filter = trim((string) ($_GET['status'] ?? ''));
+    if ($filter !== '') {
+        $orders = array_filter($orders, function ($o) use ($filter) {
+            return ($o['status'] ?? '') === $filter;
+        });
+    }
+    $total = count($orders);
+    $pending = 0;
+    $confirmed = 0;
+    $expired = 0;
+    $allOrders = orders_read();
+    foreach ($allOrders as $o) {
+        $s = $o['status'] ?? '';
+        if ($s === 'WaitingConfirm') $pending++;
+        elseif ($s === 'Confirmed') $confirmed++;
+        elseif ($s === 'Expired') $expired++;
+    }
+    $home = admin_home_url($base);
+    $e = function ($s) { return htmlspecialchars((string) $s, ENT_QUOTES); };
+    $rows = '';
+    foreach ($orders as $o) {
+        $track = $o['trackingNumber'] ?? '';
+        $method = $o['paymentMethod'] ?? '';
+        $amount = $o['amount'] ?? 0;
+        $status = $o['status'] ?? '';
+        $created = $o['createdAt'] ?? '';
+        $trxId = $o['trxId'] ?? '';
+        $detailUrl = $home . '/order_detail?tracking=' . urlencode($track);
+        $rows .= '<tr>'
+            . '<td><a href="' . $e($detailUrl) . '" style="color:var(--acc);text-decoration:none">' . $e(substr($track, 0, 8)) . '...</a></td>'
+            . '<td><span class="badge">' . $e($method) . '</span></td>'
+            . '<td>' . number_format($amount) . '</td>'
+            . '<td>' . ($trxId !== '' ? $e($trxId) : '<span class="muted">—</span>') . '</td>'
+            . '<td>' . payment_status_badge($status) . '</td>'
+            . '<td class="muted">' . $e($created) . '</td>'
+            . '</tr>';
+    }
+    if ($rows === '') {
+        $rows = '<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">No orders found</td></tr>';
+    }
+    $fPending = $filter === 'WaitingConfirm' ? ' style="border-color:var(--warn);color:var(--warn)"' : '';
+    $fConfirmed = $filter === 'Confirmed' ? ' style="border-color:var(--acc2);color:var(--acc2)"' : '';
+    $fExpired = $filter === 'Expired' ? ' style="border-color:var(--danger);color:var(--danger)"' : '';
+    $fAll = $filter === '' ? ' style="border-color:var(--acc);color:var(--acc)"' : '';
+    $body = $ok
+        . '<div class="grid" style="margin-bottom:18px">'
+        . '<div class="stat"><div class="k">Total</div><div class="v">' . number_format($total) . '</div></div>'
+        . '<div class="stat"><div class="k">Pending</div><div class="v" style="color:var(--warn)">' . number_format($pending) . '</div></div>'
+        . '<div class="stat"><div class="k">Confirmed</div><div class="v" style="color:var(--acc2)">' . number_format($confirmed) . '</div></div>'
+        . '<div class="stat"><div class="k">Expired</div><div class="v" style="color:var(--danger)">' . number_format($expired) . '</div></div>'
+        . '</div>'
+        . '<div class="card"><h3>Orders</h3>'
+        . '<div class="row" style="margin-bottom:14px;gap:8px">'
+        . '<a class="btn ghost sm" href="' . $e($home . '/orders') . '"' . $fAll . '>All</a>'
+        . '<a class="btn ghost sm" href="' . $e($home . '/orders?status=WaitingConfirm') . '"' . $fPending . '>Pending</a>'
+        . '<a class="btn ghost sm" href="' . $e($home . '/orders?status=Confirmed') . '"' . $fConfirmed . '>Confirmed</a>'
+        . '<a class="btn ghost sm" href="' . $e($home . '/orders?status=Expired') . '"' . $fExpired . '>Expired</a>'
+        . '</div>'
+        . '<table><thead><tr><th>Tracking</th><th>Method</th><th>Amount</th><th>TRX ID</th><th>Status</th><th>Created</th></tr></thead><tbody>'
+        . $rows . '</tbody></table></div>';
+    admin_layout($base, 'orders', 'Orders', $body, $_SESSION['px_user'] ?? '');
+}
+
+function admin_render_order_detail(string $base, string $notice = ''): void
+{
+    $tracking = trim((string) ($_GET['tracking'] ?? ''));
+    $order = find_order_by_tracking($tracking);
+    if (!$order) {
+        admin_redirect_home($base);
+        return;
+    }
+    $ok = admin_notice_html($notice);
+    $home = admin_home_url($base);
+    $e = function ($s) { return htmlspecialchars((string) $s, ENT_QUOTES); };
+    $pmData = payment_methods_data_read();
+    $methods = $pmData['methods'] ?? [];
+    $methodKey = $order['paymentMethod'] ?? '';
+    $methodInfo = $methods[$methodKey] ?? [];
+    $accountNumber = $order['accountNumber'] ?? '';
+    if ($accountNumber === '') {
+        foreach (($methodInfo['accounts'] ?? []) as $acc) {
+            if ($acc['enabled'] ?? false) { $accountNumber = $acc['number'] ?? ''; break; }
+        }
+    }
+    $detail = '<div class="grid">'
+        . '<div class="stat"><div class="k">Tracking</div><div class="v" style="font-size:14px;word-break:break-all">' . $e($order['trackingNumber'] ?? '') . '</div></div>'
+        . '<div class="stat"><div class="k">Status</div><div class="v">' . payment_status_badge($order['status'] ?? '') . '</div></div>'
+        . '<div class="stat"><div class="k">Method</div><div class="v"><span class="badge">' . $e($methodKey) . '</span> ' . $e($methodInfo['name'] ?? $methodKey) . '</div></div>'
+        . '<div class="stat"><div class="k">Amount</div><div class="v">' . number_format($order['amount'] ?? 0) . '</div></div>'
+        . '<div class="stat"><div class="k">Channel</div><div class="v">' . $e($order['paymentChannel'] ?? '') . '</div></div>'
+        . '<div class="stat"><div class="k">Account</div><div class="v" style="font-size:13px">' . $e($accountNumber) . '</div></div>'
+        . '<div class="stat"><div class="k">TRX ID</div><div class="v" style="font-size:13px">' . ($order['trxId'] !== null ? $e($order['trxId']) : '<span class="muted">—</span>') . '</div></div>'
+        . '<div class="stat"><div class="k">Payer Account</div><div class="v" style="font-size:13px">' . ($order['payerAccount'] !== null ? $e($order['payerAccount']) : '<span class="muted">—</span>') . '</div></div>'
+        . '<div class="stat"><div class="k">Created</div><div class="v" style="font-size:13px">' . $e($order['createdAt'] ?? '') . '</div></div>'
+        . '<div class="stat"><div class="k">Expires</div><div class="v" style="font-size:13px">' . $e($order['expiresAt'] ?? '') . '</div></div>'
+        . '<div class="stat"><div class="k">Confirmed</div><div class="v" style="font-size:13px">' . ($order['confirmedAt'] !== null ? $e($order['confirmedAt']) : '<span class="muted">—</span>') . '</div></div>'
+        . '</div>';
+    $deleteForm = '<div class="card"><h3>Delete Order</h3>'
+        . '<form method="post" action="' . $e($home . '/order_detail?tracking=' . urlencode($tracking)) . '" onsubmit="return confirm(\'Delete this order permanently?\')">'
+        . '<input type="hidden" name="csrf" value="' . htmlspecialchars(admin_csrf(), ENT_QUOTES) . '">'
+        . '<input type="hidden" name="action" value="delete_order"><input type="hidden" name="tracking" value="' . $e($tracking) . '">'
+        . '<button class="btn danger" type="submit">Delete order</button></form></div>';
+    $body = $ok . '<div style="margin-bottom:14px"><a class="btn ghost sm" href="' . $e($home . '/orders') . '">&larr; Back to orders</a></div>'
+        . '<div class="card"><h3>Order Detail</h3>' . $detail . '</div>' . $deleteForm;
+    admin_layout($base, 'orders', 'Order Detail', $body, $_SESSION['px_user'] ?? '');
+}
+
+/* -------------------- payments: payment methods -------------------- */
+
+function admin_render_payment_methods(string $base, string $notice = ''): void
+{
+    $ok = admin_notice_html($notice);
+    $pmData = payment_methods_data_read();
+    $methods = $pmData['methods'] ?? [];
+    $action = htmlspecialchars(admin_home_url($base) . '/payment_methods');
+    $csrf = htmlspecialchars(admin_csrf(), ENT_QUOTES);
+    $e = function ($s) { return htmlspecialchars((string) $s, ENT_QUOTES); };
+    $tiny = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+
+    $panels = '';
+    foreach ($methods as $key => $m) {
+        $name = $m['name'] ?? $key;
+        $enabled = !empty($m['enabled']);
+        $color = $m['color'] ?? '';
+        $accounts = $m['accounts'] ?? [];
+
+        $accRows = '';
+        $ai = 0;
+        foreach ($accounts as $acc) {
+            $accNum = $acc['number'] ?? '';
+            $accName = $acc['name'] ?? '';
+            $accEnabled = !empty($acc['enabled']);
+            $channels = $acc['channels'] ?? [];
+
+            $chRows = '';
+            $ci = 0;
+            foreach ($channels as $ch) {
+                $chName = $ch['name'] ?? '';
+                $chEnabled = !empty($ch['enabled']);
+                $chMin = $ch['min'] ?? 100;
+                $chMax = $ch['max'] ?? 30000;
+                $chRows .= '<tr>'
+                    . '<td><input name="m[' . $key . '][accounts][' . $ai . '][channels][' . $ci . '][name]" value="' . $e($chName) . '"></td>'
+                    . '<td style="text-align:center"><label class="vc-switch"><input type="checkbox" name="m[' . $key . '][accounts][' . $ai . '][channels][' . $ci . '][enabled]" value="1" ' . ($chEnabled ? 'checked' : '') . '><span class="sl"></span></label></td>'
+                    . '<td><input type="number" name="m[' . $key . '][accounts][' . $ai . '][channels][' . $ci . '][min]" value="' . (int) $chMin . '" style="width:80px"></td>'
+                    . '<td><input type="number" name="m[' . $key . '][accounts][' . $ai . '][channels][' . $ci . '][max]" value="' . (int) $chMax . '" style="width:80px"></td>'
+                    . '<td style="text-align:center"><input type="checkbox" name="m[' . $key . '][accounts][' . $ai . '][channels][' . $ci . '][remove]" value="1" style="width:auto" title="Remove"></td>'
+                    . '</tr>';
+                $ci++;
+            }
+            $nCh = count($channels);
+            $chRows .= '<tr>'
+                . '<td><input name="m[' . $key . '][accounts][' . $ai . '][channels][' . $nCh . '][name]" placeholder="Add channel..."></td>'
+                . '<td style="text-align:center"><label class="vc-switch"><input type="checkbox" name="m[' . $key . '][accounts][' . $ai . '][channels][' . $nCh . '][enabled]" value="1" checked><span class="sl"></span></label></td>'
+                . '<td><input type="number" name="m[' . $key . '][accounts][' . $ai . '][channels][' . $nCh . '][min]" value="100" style="width:80px"></td>'
+                . '<td><input type="number" name="m[' . $key . '][accounts][' . $ai . '][channels][' . $nCh . '][max]" value="30000" style="width:80px"></td>'
+                . '<td class="muted" style="text-align:center">new</td>'
+                . '</tr>';
+
+            $accRows .= '<details class="vc-ch" open><summary>'
+                . '<span>' . $e($accNum) . ' — ' . $e($accName) . '</span>'
+                . '<span class="muted">' . count($channels) . ' channels <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>'
+                . '</summary><div class="body"><table><thead><tr><th>Channel Name</th><th style="width:80px;text-align:center">On</th><th style="width:80px">Min</th><th style="width:80px">Max</th><th style="width:70px;text-align:center">Del</th></tr></thead><tbody>'
+                . $chRows . '</tbody></table></div></details>';
+            $ai++;
+        }
+
+        $nAcc = count($accounts);
+        $accRows .= '<div style="margin-top:10px"><details class="vc-ch"><summary><span class="muted">+ Add account</span></summary><div class="body">'
+            . '<div class="vc-fields">'
+            . '<div class="vc-field"><label>Account Number</label><input name="m[' . $key . '][accounts][' . $nAcc . '][number]" placeholder="01XXXXXXXXX"></div>'
+            . '<div class="vc-field"><label>Account Name</label><input name="m[' . $key . '][accounts][' . $nAcc . '][name]" placeholder="Account holder name"></div>'
+            . '</div>'
+            . '<label class="vc-switch" style="margin-top:10px"><input type="checkbox" name="m[' . $key . '][accounts][' . $nAcc . '][enabled]" value="1" checked><span class="sl"></span><span>Enabled</span></label>'
+            . '</div></details></div>';
+
+        $panels .= '<div class="card vc-sec">'
+            . '<div class="vc-sec-head"><h3><span class="badge">' . $e($key) . '</span> &nbsp;' . $e($name) . '</h3>'
+            . '<label class="vc-switch"><input type="checkbox" name="m[' . $key . '][enabled]" value="1" ' . ($enabled ? 'checked' : '') . '><span class="sl"></span><span class="txt" data-on="On" data-off="Off">' . ($enabled ? 'On' : 'Off') . '</span></label></div>'
+            . '<div class="vc-fields" style="margin-bottom:14px">'
+            . '<div class="vc-field"><label>Display Name</label><input name="m[' . $key . '][name]" value="' . $e($name) . '"></div>'
+            . '<div class="vc-field"><label>Color</label><input name="m[' . $key . '][color]" value="' . $e($color) . '" placeholder="#E2136E" style="width:120px"></div>'
+            . '</div>'
+            . '<h4 style="margin:0 0 10px;font-size:13px;color:var(--muted)">Accounts &amp; Channels</h4>'
+            . $accRows
+            . '</div>';
+    }
+
+    $style = '<style>'
+        . '.vc-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}'
+        . '.vc-field label{display:block;font-size:11px;color:var(--muted);margin:0 0 5px;text-transform:uppercase;letter-spacing:.05em}'
+        . '.vc-field input{width:100%}'
+        . '.vc-sec{margin-bottom:18px}'
+        . '.vc-sec-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}'
+        . '.vc-sec-head h3{margin:0;display:flex;align-items:center;font-size:15px}'
+        . '.vc-ch{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:var(--panel2);overflow:hidden}'
+        . '.vc-ch>summary{list-style:none;cursor:pointer;padding:11px 13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:10px}'
+        . '.vc-ch>summary::-webkit-details-marker{display:none}'
+        . '.vc-ch[open]>summary{border-bottom:1px solid var(--line)}'
+        . '.vc-ch .body{padding:12px 13px}'
+        . '.vc-ch .body table{margin:0}'
+        . '.vc-ch .chev{transition:transform .15s;vertical-align:middle;margin-left:6px}'
+        . '.vc-ch[open] .chev{transform:rotate(180deg)}'
+        . '.vc-switch{position:relative;display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px;color:var(--muted);user-select:none}'
+        . '.vc-switch input{position:absolute;opacity:0;width:0;height:0}'
+        . '.vc-switch .sl{width:40px;height:22px;border-radius:999px;background:#2a3444;position:relative;transition:.15s;flex:0 0 40px}'
+        . '.vc-switch .sl:before{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#9aa6b6;transition:.15s}'
+        . '.vc-switch input:checked+.sl{background:#22c55e}'
+        . '.vc-switch input:checked+.sl:before{transform:translateX(18px);background:#fff}'
+        . '.vc-savebar{position:sticky;bottom:14px;display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:12px 14px;background:rgba(18,23,34,.94);border:1px solid var(--line);border-radius:12px;backdrop-filter:blur(6px)}'
+        . '</style>';
+
+    $preview = '<script>(function(){'
+        . 'document.querySelectorAll(".vc-switch input").forEach(function(cb){'
+        . 'cb.addEventListener("change",function(){var t=cb.parentElement.querySelector(".txt");'
+        . 'if(t)t.textContent=cb.checked?(t.getAttribute("data-on")||"On"):(t.getAttribute("data-off")||"Off");});});'
+        . '})();</script>';
+
+    $body = $ok . $style
+        . '<div class="card"><h3>Payment Methods</h3><div class="desc">Manage payment accounts, channels, and min/max amounts per channel. Changes here affect the order creation API and payment page.</div></div>'
+        . '<form method="post" action="' . $action . '">'
+        . '<input type="hidden" name="csrf" value="' . $csrf . '"><input type="hidden" name="action" value="save_payment_methods">'
+        . $panels
+        . '<div class="vc-savebar"><span class="muted" style="margin-right:auto">Changes apply immediately to the payment system.</span>'
+        . '<button class="btn" type="submit">Save payment methods</button></div>'
+        . '</form>' . $preview;
+    admin_layout($base, 'payment_methods', 'Payment Methods', $body, $_SESSION['px_user'] ?? '');
+}
+
+/* -------------------- payments: settings -------------------- */
+
+function admin_render_payment_settings(string $base, string $notice = ''): void
+{
+    $ok = admin_notice_html($notice);
+    $settings = payment_settings_read();
+    $action = htmlspecialchars(admin_home_url($base) . '/payment_settings');
+    $csrf = htmlspecialchars(admin_csrf(), ENT_QUOTES);
+    $e = function ($s) { return htmlspecialchars((string) $s, ENT_QUOTES); };
+
+    $body = $ok . '<div class="card"><h3>Payment Settings</h3>'
+        . '<div class="desc">Platform name, currency, and other settings used by the payment page and API.</div>'
+        . '<form method="post" action="' . $action . '">'
+        . '<input type="hidden" name="csrf" value="' . $csrf . '"><input type="hidden" name="action" value="save_payment_settings">'
+        . '<div class="row" style="gap:16px">'
+        . '<div style="flex:1"><label>Platform Name</label><input name="platformName" value="' . $e($settings['platformName'] ?? 'VoucherCenter') . '"></div>'
+        . '<div style="flex:1"><label>Brand Name</label><input name="brandName" value="' . $e($settings['brandName'] ?? '') . '"></div>'
+        . '</div>'
+        . '<div class="row" style="gap:16px">'
+        . '<div style="flex:1"><label>Currency</label><input name="currency" value="' . $e($settings['currency'] ?? 'BDT') . '"></div>'
+        . '<div style="flex:1"><label>Currency Symbol</label><input name="currencySymbol" value="' . $e($settings['currencySymbol'] ?? '') . '"></div>'
+        . '<div style="flex:1"><label>Time Zone (UTC offset)</label><input type="number" name="timeZone" value="' . (int) ($settings['timeZone'] ?? 6) . '"></div>'
+        . '</div>'
+        . '<div class="row" style="gap:16px">'
+        . '<div style="flex:1"><label>Language</label><select name="language"><option value="bn"' . (($settings['language'] ?? '') === 'bn' ? ' selected' : '') . '>Bengali</option><option value="en"' . (($settings['language'] ?? '') === 'en' ? ' selected' : '') . '>English</option></select></div>'
+        . '<div style="flex:1"><label>Test Mode</label><select name="isTest"><option value="0"' . (empty($settings['isTest']) ? ' selected' : '') . '>Off (Live)</option><option value="1"' . (!empty($settings['isTest']) ? ' selected' : '') . '>On (Test)</option></select></div>'
+        . '</div>'
+        . '<button class="btn" type="submit">Save payment settings</button></form></div>';
+    admin_layout($base, 'payment_settings', 'Payment Settings', $body, $_SESSION['px_user'] ?? '');
+}
+
 /* --------------------------- router --------------------------- */
 
 function handleAdmin(string $base, string $sub, array $cfg): void
@@ -1009,6 +1294,79 @@ function handleAdmin(string $base, string $sub, array $cfg): void
             case 'purge':
                 $notice = 'Cache purged (' . admin_purge_cache(CACHE_DIR) . ' files).';
                 break;
+
+            case 'save_payment_methods':
+                $methods = [];
+                $mIn = (array) ($_POST['m'] ?? []);
+                foreach ($mIn as $key => $mRow) {
+                    $accounts = [];
+                    $accIn = (array) ($mRow['accounts'] ?? []);
+                    foreach ($accIn as $accRow) {
+                        $num = trim((string) ($accRow['number'] ?? ''));
+                        if ($num === '') continue;
+                        $channels = [];
+                        $chIn = (array) ($accRow['channels'] ?? []);
+                        foreach ($chIn as $chRow) {
+                            if (!empty($chRow['remove'])) continue;
+                            $chName = trim((string) ($chRow['name'] ?? ''));
+                            if ($chName === '') continue;
+                            $channels[] = [
+                                'name'    => $chName,
+                                'enabled' => !empty($chRow['enabled']),
+                                'min'     => max(0, (int) ($chRow['min'] ?? 100)),
+                                'max'     => max(0, (int) ($chRow['max'] ?? 30000)),
+                            ];
+                        }
+                        $accounts[] = [
+                            'number'   => $num,
+                            'name'     => trim((string) ($accRow['name'] ?? '')),
+                            'enabled'  => !empty($accRow['enabled']),
+                            'channels' => $channels,
+                        ];
+                    }
+                    $methods[$key] = [
+                        'name'     => trim((string) ($mRow['name'] ?? $key)),
+                        'enabled'  => !empty($mRow['enabled']),
+                        'color'    => trim((string) ($mRow['color'] ?? '')),
+                        'logo'     => trim((string) ($mRow['logo'] ?? '')),
+                        'accounts' => $accounts,
+                    ];
+                }
+                $existing = payment_methods_data_read();
+                $existing['methods'] = $methods;
+                payment_methods_data_write($existing);
+                $notice = 'Payment methods saved.';
+                break;
+
+            case 'save_payment_settings':
+                $s = [];
+                $s['platformName']   = trim((string) ($_POST['platformName'] ?? 'VoucherCenter'));
+                $s['brandName']      = trim((string) ($_POST['brandName'] ?? ''));
+                $s['currency']       = trim((string) ($_POST['currency'] ?? 'BDT'));
+                $s['currencySymbol'] = trim((string) ($_POST['currencySymbol'] ?? ''));
+                $s['timeZone']       = (int) ($_POST['timeZone'] ?? 6);
+                $s['language']       = trim((string) ($_POST['language'] ?? 'bn'));
+                $s['isTest']         = ($_POST['isTest'] ?? '0') === '1';
+                $s['favicon']        = payment_settings_read()['favicon'] ?? '';
+                $s['logo']           = payment_settings_read()['logo'] ?? '';
+                payment_settings_write($s);
+                $notice = 'Payment settings saved.';
+                break;
+
+            case 'delete_order':
+                $track = trim((string) ($_POST['tracking'] ?? ''));
+                if ($track !== '') {
+                    $all = orders_read();
+                    $kept = [];
+                    foreach ($all as $o) {
+                        if (($o['trackingNumber'] ?? '') !== $track) {
+                            $kept[] = $o;
+                        }
+                    }
+                    orders_write($kept);
+                    $notice = 'Order deleted.';
+                }
+                break;
         }
     }
 
@@ -1046,6 +1404,18 @@ function handleAdmin(string $base, string $sub, array $cfg): void
             break;
         case 'tools':
             admin_render_tools($base, $notice);
+            break;
+        case 'orders':
+            admin_render_orders($base, $notice);
+            break;
+        case 'order_detail':
+            admin_render_order_detail($base, $notice);
+            break;
+        case 'payment_methods':
+            admin_render_payment_methods($base, $notice);
+            break;
+        case 'payment_settings':
+            admin_render_payment_settings($base, $notice);
             break;
         default:
             admin_redirect_home($base);
