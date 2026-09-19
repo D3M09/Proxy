@@ -1,9 +1,9 @@
 <?php
 $uri = urldecode(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH));
 
-// Serve static files directly
-if ($uri !== '/' && is_file(__DIR__ . $uri)) {
-    $ext = pathinfo($uri, PATHINFO_EXTENSION);
+// Serve static files directly (skip .php files — they need to be executed)
+$uriExt = pathinfo($uri, PATHINFO_EXTENSION);
+if ($uri !== '/' && $uriExt !== 'php' && is_file(__DIR__ . $uri)) {
     $mimeTypes = [
         'css' => 'text/css',
         'js' => 'application/javascript',
@@ -20,8 +20,8 @@ if ($uri !== '/' && is_file(__DIR__ . $uri)) {
         'ttf' => 'font/ttf',
         'html' => 'text/html; charset=utf-8',
     ];
-    if (isset($mimeTypes[$ext])) {
-        header('Content-Type: ' . $mimeTypes[$ext]);
+    if (isset($mimeTypes[$uriExt])) {
+        header('Content-Type: ' . $mimeTypes[$uriExt]);
     }
     readfile(__DIR__ . $uri);
     return true;
