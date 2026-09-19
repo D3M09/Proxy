@@ -122,12 +122,20 @@ $html = preg_replace('/<meta\s+http-equiv="Pragma"[^>]*>/i', '', $html);
 $html = preg_replace('/<meta\s+http-equiv="Expires"[^>]*>/i', '', $html);
 $html = preg_replace('/\sdata-savepage-[a-z]+="[^"]*"/i', '', $html);
 
+$origStyles = '';
+if (preg_match('/<head>(.*)<\/head>/is', $html, $headMatch)) {
+    $headContent = $headMatch[1];
+    preg_match_all('/<style[^>]*>.*?<\/style>/is', $headContent, $styleMatches);
+    $origStyles = implode("\n", $styleMatches[0]);
+}
+
 $headReplace = '<head>'
     . '<meta charset="UTF-8">'
     . '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">'
     . '<title>Payment - ' . htmlspecialchars($brandName) . '</title>'
     . '<link rel="icon" href="/images/favicon.ico">'
     . '<link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">'
+    . $origStyles
     . '<style>'
     . '.blink-text{animation:blink 1s step-end infinite}'
     . '@keyframes blink{50%{opacity:0}}'
