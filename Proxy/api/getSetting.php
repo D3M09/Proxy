@@ -6,7 +6,7 @@ header('Access-Control-Allow-Headers: Content-Type');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
 
-require_once __DIR__ . '/../Proxy/admin/store.php';
+require_once __DIR__ . '/../admin/store.php';
 
 $settings = payment_settings_read();
 

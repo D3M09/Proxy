@@ -44,6 +44,9 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
     RewriteRule ^setup/?$ setup.php [L,QSA]
     RewriteRule ^setup/(.*)$ setup.php [L,QSA]
 
+    # Payment API endpoints
+    RewriteRule ^api/(.*)$ api/$1 [L,QSA]
+
     # Proxy root (with or without trailing slash)
     RewriteRule ^$ index.php [L]
 

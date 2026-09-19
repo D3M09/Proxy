@@ -2,7 +2,6 @@
 Options -Indexes
 <IfModule mod_rewrite.c>
     RewriteEngine On
-    # Only allow .php files to be accessed.
     RewriteCond %{REQUEST_URI} !\.php$
     RewriteRule ^ - [R=404,L]
 </IfModule>

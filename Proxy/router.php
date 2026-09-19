@@ -39,5 +39,18 @@ if ($uri === '/setup' || $uri === '/setup/' || $uri === '/setup.php') {
     return true;
 }
 
+// Payment API endpoints
+if ($uri === '/api' || strpos($uri, '/api/') === 0) {
+    $apiFile = __DIR__ . $uri;
+    if (is_file($apiFile) && pathinfo($apiFile, PATHINFO_EXTENSION) === 'php') {
+        require $apiFile;
+        return true;
+    }
+    http_response_code(404);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Not found']);
+    return true;
+}
+
 // Route everything else through index.php
 require __DIR__ . '/index.php';
