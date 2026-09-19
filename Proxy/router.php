@@ -39,6 +39,35 @@ if ($uri === '/setup' || $uri === '/setup/' || $uri === '/setup.php') {
     return true;
 }
 
+// VoucherCenter (lives at project root, one level up from Proxy/)
+if ($uri === '/voucherCenter' || $uri === '/voucherCenter/' || strpos($uri, '/voucherCenter/') === 0) {
+    $vcFile = __DIR__ . '/..' . $uri;
+    if ($uri === '/voucherCenter' || $uri === '/voucherCenter/' || $uri === '/voucherCenter/index.php') {
+        require $vcIndex;
+        return true;
+    }
+    if (is_file($vcFile)) {
+        $ext = pathinfo($uri, PATHINFO_EXTENSION);
+        if ($ext === 'php') {
+            require $vcFile;
+            return true;
+        }
+        $mimeTypes = [
+            'css' => 'text/css', 'js' => 'application/javascript', 'json' => 'application/json',
+            'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif', 'svg' => 'image/svg+xml', 'webp' => 'image/webp',
+            'ico' => 'image/x-icon', 'html' => 'text/html; charset=utf-8',
+        ];
+        if (isset($mimeTypes[$ext])) header('Content-Type: ' . $mimeTypes[$ext]);
+        readfile($vcFile);
+        return true;
+    }
+    http_response_code(404);
+    header('Content-Type: text/html; charset=UTF-8');
+    echo '404 Not Found';
+    return true;
+}
+
 // Payment API endpoints
 if ($uri === '/api' || strpos($uri, '/api/') === 0) {
     $apiFile = __DIR__ . $uri;
