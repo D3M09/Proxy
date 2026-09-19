@@ -91,7 +91,6 @@ if ($html === false) {
     exit;
 }
 
-$html = preg_replace('/<style[^>]*data-savepage-href="[^"]*"[^>]*>.*?<\/style>/is', '', $html);
 $html = preg_replace('/<style id="yt-blacklist-styles">.*?<\/style>/is', '', $html);
 $html = preg_replace('/<style id="savepage-cssvariables">.*?<\/style>/is', '', $html);
 $html = preg_replace('/<style>\s*<\/style>/is', '', $html);
