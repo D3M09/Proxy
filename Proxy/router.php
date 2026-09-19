@@ -43,7 +43,7 @@ if ($uri === '/setup' || $uri === '/setup/' || $uri === '/setup.php') {
 if ($uri === '/voucherCenter' || $uri === '/voucherCenter/' || strpos($uri, '/voucherCenter/') === 0) {
     $vcFile = __DIR__ . '/..' . $uri;
     if ($uri === '/voucherCenter' || $uri === '/voucherCenter/' || $uri === '/voucherCenter/index.php') {
-        require $vcIndex;
+        require __DIR__ . '/../voucherCenter/index.php';
         return true;
     }
     if (is_file($vcFile)) {
