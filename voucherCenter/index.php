@@ -192,7 +192,8 @@ $chScript = '<script>(function(){var CH=' . $jenc($channelsByMethod) . ';'
     . 'if(ch.enabled!==false&&!first)first=li;'
     . 'li.addEventListener("click",function(){var all=ul.querySelectorAll("li");for(var i=0;i<all.length;i++){var on=all[i]===li;all[i].classList.toggle("selected",on);all[i].classList.toggle("ck",on);mark(all[i],on);}window.selectedPaymentChannel=ch.label;});'
     . '});if(first)first.click();}'
-    . 'function boot(){var ms=document.querySelectorAll("li.change-item-animate");for(var i=0;i<ms.length;i++){(function(li){li.addEventListener("click",function(){var k=keyOf(li);if(k)setTimeout(function(){render(k);},0);});})(ms[i]);}var sel=document.querySelector("li.change-item-animate.selected")||ms[0];if(sel){var k=keyOf(sel);if(k)render(k);}}'
+    . 'function getActiveMethod(){var sel=document.querySelector("li.change-item-animate.selected");if(sel){var k=keyOf(sel);if(k)return k;}var ck=document.querySelector("li.change-item-animate.ck");if(ck){var k2=keyOf(ck);if(k2)return k2;}var ms=document.querySelectorAll("li.change-item-animate");if(ms.length){var k3=keyOf(ms[0]);if(k3)return k3;}return null;}'
+    . 'function boot(){var ms=document.querySelectorAll("li.change-item-animate");for(var i=0;i<ms.length;i++){(function(li){li.addEventListener("click",function(){var k=keyOf(li);if(k)render(k);});})(ms[i]);}var k=getActiveMethod();if(k)render(k);}'
     . 'if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",function(){setTimeout(boot,0);});else setTimeout(boot,0);'
     . '})();</script>';
 $html = preg_replace('/<\/body>/i', $chScript . '</body>', $html, 1);
@@ -200,7 +201,10 @@ $html = preg_replace('/<\/body>/i', $chScript . '</body>', $html, 1);
 $apiCreateOrder = '/api/createOrder.php';
 $paymentUrl = $vcBase . '/payment.php';
 $nextJs = '(function(){'
-    . 'var m=window.selectedPaymentMethod,a=window.selectedDepositAmount,c=window.selectedPaymentChannel||"Personal";'
+    . 'var m=window.selectedPaymentMethod,a=window.selectedDepositAmount;'
+    . 'var c=window.selectedPaymentChannel;'
+    . 'if(!c){var chEl=document.querySelector(".vc-v2-method-list li.selected span.method-list-info, .vc-v2-method-list li.ck span.method-list-info");if(chEl)c=chEl.textContent.trim();}'
+    . 'if(!c)c="Personal";'
     . 'if(!m||!a){alert("Please select method and amount");return;}'
     . 'var btn=document.querySelector(".vc-v2-submit");'
     . 'if(btn){btn.disabled=true;btn.textContent="Processing...";}'
