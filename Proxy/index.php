@@ -506,20 +506,20 @@ function brandReplaceText(string $text): string
  */
 function stripConsoleWrites(string $body, string $contentType): string
 {
-    if ($body === '' || strpos($body, 'console.') === false) {
+    if ($body === '' || stripos($body, 'console.') === false) {
         return $body;
     }
-    // Only touch JS and HTML (where console writes matter)
     $isJs = stripos($contentType, 'javascript') !== false || stripos($contentType, 'application/javascript') !== false;
     $isHtml = stripos($contentType, 'text/html') !== false;
     if (!$isJs && !$isHtml) {
         return $body;
     }
-    // Remove console.log|warn|error|info|debug|trace|...(...) with optional ;  — keep code valid (keep console.clear)
-    // Handles: console.log("brand",brand); console.warn(foo)
-    $body = preg_replace('/\bconsole\s*\.\s*(log|warn|error|info|debug|trace|assert|count|dir|dirxml|group|groupCollapsed|groupEnd|time|timeEnd|timeLog|table|profile|profileEnd)\s*\([^)]*\)\s*;?/i', '', $body);
-    // Also remove leftover empty console.log lines like "console.log;"
+    // Aggressive strip: any console.xxx(...) up to ; or </script> — handles multiline and nested quotes
+    $body = preg_replace('/\bconsole\s*\.\s*(log|warn|error|info|debug|trace|assert|count|dir|dirxml|group|groupCollapsed|groupEnd|time|timeEnd|timeLog|table|profile|profileEnd)\s*\([^;]*?\)\s*;?/is', '', $body);
     $body = preg_replace('/\bconsole\s*\.\s*(log|warn|error)\s*;/i', '', $body);
+    // Fallback for the specific brand log that upstream injects without ; before </script>
+    $body = str_ireplace('console.log("brand",brand)', '', $body);
+    $body = str_ireplace("console.log('brand',brand)", '', $body);
     return $body === null ? $body : $body;
 }
 
