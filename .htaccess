@@ -28,6 +28,9 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
     # Proxy app root (with or without trailing slash) - redirect to clean root
     RewriteRule ^Proxy/?$ / [R=301,L]
 
+    # Test redirect for debugging
+    RewriteRule ^test_clean$ / [R=302,L]
+
     # Local shortcut: /admin -> the proxy's hidden admin panel
     RewriteRule ^admin(/.*)?$ Proxy/admin/index.php [L,QSA]
 
