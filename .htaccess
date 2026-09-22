@@ -47,8 +47,8 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
     RewriteCond %{REQUEST_FILENAME} -d
     RewriteRule ^ - [L]
 
-    # Everything else goes through the proxy
-    RewriteRule ^ Proxy/index.php [L,QSA]
+    # Everything else goes through the proxy (clean URLs, hide Proxy)
+    RewriteRule ^ Proxy/index_clean.php [L,QSA]
 </IfModule>
 
 <IfModule mod_expires.c>
