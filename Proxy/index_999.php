@@ -4,6 +4,8 @@
  * Caches upstream resources locally under cache/ directory.
  */
 header('Content-Type: text/html; charset=utf-8');
+header('X-Debug-Proxy: 1');
+header('X-Top-Test: 1');
 
 $configFile = __DIR__ . '/config.php';
 if (!is_file($configFile)) {
