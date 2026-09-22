@@ -14,6 +14,16 @@ if (!is_file($configFile)) {
 }
 $appConfig = require $configFile;
 
+if (isset($_GET['debug_docroot'])) {
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "DOCUMENT_ROOT=" . ($_SERVER['DOCUMENT_ROOT'] ?? '') . "\n";
+    echo "SCRIPT_FILENAME=" . ($_SERVER['SCRIPT_FILENAME'] ?? '') . "\n";
+    echo "PWD=" . getcwd() . "\n";
+    echo "__DIR__=" . __DIR__ . "\n";
+    echo "REQUEST_URI=" . ($_SERVER['REQUEST_URI'] ?? '') . "\n";
+    exit;
+}
+
 define('UPSTREAM', rtrim((string) ($appConfig['upstream'] ?? ''), '/'));
 define('CACHE_DIR', __DIR__ . '/cache');
 define('CACHE_TTL', max(0, (int) ($appConfig['cache_ttl'] ?? 3600))); // seconds
