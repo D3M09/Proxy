@@ -168,6 +168,9 @@ $html = preg_replace('/<head>.*?<\/head>/is', $headReplace, $html, 1);
 $html = str_replace('src="/icons/', 'src="/images/icons/', $html);
 $html = str_replace('src="/banks/', 'src="/images/banks/', $html);
 $html = str_replace('src="/transactions/', 'src="/images/transactions/', $html);
+// Cache-bust top icons to bypass stale Cloudflare cache (HTML cached as image)
+$html = str_replace('src="/images/icons/pay-service.svg"', 'src="/images/icons/pay-service.svg?v=7cce0e5"', $html);
+$html = str_replace('src="/images/icons/pay-page-copy.png"', 'src="/images/icons/pay-page-copy.png?v=7cce0e5"', $html);
 
 $html = preg_replace('/background:\s*rgb\(0,\s*102,\s*68\)/', 'background: ' . $methodColor, $html);
 $html = preg_replace('/background:\s*rgb\(242,\s*79,\s*65\)/', 'background: ' . $methodColor, $html);
