@@ -34,7 +34,7 @@
         "url": "https://cdn.iconscout.com/icon/free/png-256/free-lotto-logo-icon-svg-download-png-2854264.png"
     },
     "voucher": {
-        "enabled": false,
+        "enabled": true,
         "path": "/m/voucherCenter",
         "redirect_url": "/voucherCenter/",
         "logo": "",
