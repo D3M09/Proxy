@@ -244,7 +244,7 @@ if (stripos((string) $contentType, 'text/html') !== false) {
     $body = applyContentHtml($body, $contentConfig);
     $body = rewriteAndCache($body);
     $body = injectCombinedShims($body, $base, $contentConfig);
-    if (stripos($path, '/m') === 0) {
+    if (stripos($path, '/m') === 0 && stripos($path, 'invite') === false) {
         $body = injectSplashShim($body);
     }
 }
@@ -534,10 +534,7 @@ function stripConsoleWrites(string $body, string $contentType): string
     if (!$isJs && !$isHtml) {
         return $body;
     }
-    // Aggressive strip: any console.xxx(...) up to ; or </script> — handles multiline and nested quotes
-    $body = preg_replace('/\bconsole\s*\.\s*(log|warn|error|info|debug|trace|assert|count|dir|dirxml|group|groupCollapsed|groupEnd|time|timeEnd|timeLog|table|profile|profileEnd)\s*\([^;]*?\)\s*;?/is', '', $body);
-    $body = preg_replace('/\bconsole\s*\.\s*(log|warn|error)\s*;/i', '', $body);
-    // Fallback for the specific brand log that upstream injects without ; before </script>
+    // Only strip the noisy upstream brand log, keep other console.* for debugging
     $body = str_ireplace('console.log("brand",brand)', '', $body);
     $body = str_ireplace("console.log('brand',brand)", '', $body);
     return $body === null ? $body : $body;
@@ -1232,7 +1229,7 @@ function injectBaseShim(string $html, string $base): string
  */
 function injectCombinedShims(string $html, string $base, array $content): string
 {
-    $out = '<script>if(location.pathname.indexOf("/Proxy/")===0||location.pathname==="/Proxy")location.replace(location.pathname.replace(/^\/Proxy/,"")||"/"+location.search+location.hash);try{for(var k of["log","warn","error","info","debug","trace"])console[k]=function(){};}catch(e){}</script>';
+    $out = '<script>if(location.pathname.indexOf("/Proxy/")===0||location.pathname==="/Proxy")location.replace(location.pathname.replace(/^\/Proxy/,"")||"/"+location.search+location.hash);</script>';
     // base shim
     if ($base !== '') {
         $baseJson = json_encode($base);
