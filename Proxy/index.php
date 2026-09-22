@@ -282,37 +282,61 @@ function fetchUpstream(string $path): array|false
         $headers[] = $name . ': ' . $value;
     }
 
-    $ch = curl_init($url);
-    $opts = [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_MAXREDIRS      => 5,
-        CURLOPT_TIMEOUT        => 30,
-        CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_ENCODING       => '',          // accept any encoding
-        CURLOPT_CUSTOMREQUEST  => $method,
-        CURLOPT_USERAGENT      => clientUserAgent(),
-        CURLOPT_HTTPHEADER     => $headers,
-        CURLOPT_HEADERFUNCTION => $collectHeaders,
-    ];
-    if ($method === 'POST' || $method === 'PUT' || $method === 'PATCH' || $method === 'DELETE') {
-        $raw = file_get_contents('php://input');
-        if ($raw !== '' && $raw !== false) {
-            $opts[CURLOPT_POSTFIELDS] = $raw;
+    // Retry on upstream 5xx / timeout (fixes "internet off" on slow /wps/*)
+    $attempts = 0;
+    $maxAttempts = 3;
+    $lastErr = '';
+    $lastStatus = 0;
+    $lastCt = false;
+    $lastBody = false;
+    do {
+        $ch = curl_init($url);
+        $opts = [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 5,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT        => 60,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_ENCODING       => '',
+            CURLOPT_CUSTOMREQUEST  => $method,
+            CURLOPT_USERAGENT      => clientUserAgent(),
+            CURLOPT_HTTPHEADER     => $headers,
+            CURLOPT_HEADERFUNCTION => $collectHeaders,
+            CURLOPT_TCP_KEEPALIVE  => 1,
+            CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,
+        ];
+        if ($method === 'POST' || $method === 'PUT' || $method === 'PATCH' || $method === 'DELETE') {
+            $raw = file_get_contents('php://input');
+            if ($raw !== '' && $raw !== false) {
+                $opts[CURLOPT_POSTFIELDS] = $raw;
+            }
         }
-    }
-    curl_setopt_array($ch, $opts);
-    $body   = curl_exec($ch);
-    $err    = curl_error($ch);
-    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $ct     = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
-    curl_close($ch);
+        curl_setopt_array($ch, $opts);
+        $body   = curl_exec($ch);
+        $err    = curl_error($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $ct     = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+        curl_close($ch);
+        $lastBody = $body;
+        $lastErr = $err;
+        $lastStatus = $status;
+        $lastCt = $ct;
+        if ($body !== false && !$err && $status < 500 && $status !== 0) {
+            return [$body, $ct ?: false, $status, $respHeaders];
+        }
+        $attempts++;
+        if ($attempts < $maxAttempts) {
+            usleep(400000 * $attempts); // 0.4s, 0.8s backoff
+            $respHeaders = []; // reset for retry
+        }
+    } while ($attempts < $maxAttempts);
 
-    if ($body === false || $err) {
-        error_log("Proxy upstream error: $err");
+    error_log("Proxy upstream error after $attempts tries: $lastErr status:$lastStatus url:$url");
+    if ($lastBody === false || $lastErr) {
         return false;
     }
-    return [$body, $ct ?: false, $status, $respHeaders];
+    return [$lastBody, $lastCt ?: false, $lastStatus, $respHeaders];
 }
 
 /**
@@ -1025,10 +1049,13 @@ function cacheResource(string $relPath): void
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS      => 5,
-        CURLOPT_TIMEOUT        => 30,
+        CURLOPT_CONNECTTIMEOUT => 10,
+        CURLOPT_TIMEOUT        => 60,
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_ENCODING       => '',
         CURLOPT_USERAGENT      => clientUserAgent(),
+        CURLOPT_TCP_KEEPALIVE  => 1,
+        CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,
         CURLOPT_HTTPHEADER     => [
             'Accept: */*',
             'Referer: ' . UPSTREAM . '/',
