@@ -249,8 +249,8 @@ if (stripos((string) $contentType, 'text/html') !== false) {
     header('Cache-Control: no-cache, must-revalidate');
 }
 header('X-Proxy: true');
+header('X-PX-Time: total=' . number_format((microtime(true) - $pxStart) * 1000, 1) . 'ms upstream=' . number_format((isset($pxUpstreamTime) ? $pxUpstreamTime : 0), 1) . 'ms');
 header('Connection: close');
-header('Server-Timing: total;dur=' . number_format((microtime(true) - $pxStart) * 1000, 1) . ', upstream;dur=' . number_format((isset($pxUpstreamTime) ? $pxUpstreamTime : 0), 1));
 if (stripos((string) $contentType, 'text/html') === false) {
     // Allow browser caching for static assets (reduces repeat TTFB)
     header('Cache-Control: public, max-age=86400, immutable');
