@@ -163,6 +163,8 @@ $headReplace = '<head>'
     . '#expiredCard a{display:inline-block;padding:10px 24px;background:#006644;color:#fff;text-decoration:none;border-radius:6px;font-weight:600}'
     . '#countdownBar{position:fixed;top:0;left:0;right:0;height:4px;background:#e0e0e0;z-index:9999}'
     . '#countdownBar .fill{height:100%;background:' . $methodColor . ';transition:width 1s linear}'
+    . '.q-banner .q-img.q-img--menu[style*="60px"]{background:#fff!important;border:1px solid #ddd!important;border-radius:50%!important;overflow:hidden!important;padding:4px!important;box-sizing:border-box!important}'
+    . '.q-banner .q-img.q-img--menu[style*="60px"] .q-img__image{border-radius:50%!important}'
     . '</style>'
     . '</head>';
 
