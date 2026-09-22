@@ -911,7 +911,16 @@ function admin_render_payment_methods(string $base, string $notice = ''): void
             $accRows .= '<details class="vc-ch" open><summary>'
                 . '<span>' . $e($accNum) . ' — ' . $e($accName) . '</span>'
                 . '<span class="muted">' . count($channels) . ' channels <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>'
-                . '</summary><div class="body"><table><thead><tr><th>Channel Name</th><th style="width:80px;text-align:center">On</th><th style="width:80px">Min</th><th style="width:80px">Max</th><th style="width:70px;text-align:center">Del</th></tr></thead><tbody>'
+                . '</summary><div class="body">'
+                . '<div class="vc-fields">'
+                . '<div class="vc-field"><label>Account Number</label><input name="m[' . $key . '][accounts][' . $ai . '][number]" value="' . $e($accNum) . '" placeholder="01XXXXXXXXX"></div>'
+                . '<div class="vc-field"><label>Account Name</label><input name="m[' . $key . '][accounts][' . $ai . '][name]" value="' . $e($accName) . '" placeholder="Account holder name"></div>'
+                . '</div>'
+                . '<div class="row" style="gap:12px;margin:10px 0 12px">'
+                . '<label class="vc-switch"><input type="checkbox" name="m[' . $key . '][accounts][' . $ai . '][enabled]" value="1" ' . ($accEnabled ? 'checked' : '') . '><span class="sl"></span><span class="txt" data-on="Enabled" data-off="Disabled">' . ($accEnabled ? 'Enabled' : 'Disabled') . '</span></label>'
+                . '<label style="margin-left:auto;font-size:12.5px;color:var(--muted)"><input type="checkbox" name="m[' . $key . '][accounts][' . $ai . '][remove]" value="1" style="width:auto"> Remove account</label>'
+                . '</div>'
+                . '<table><thead><tr><th>Channel Name</th><th style="width:80px;text-align:center">On</th><th style="width:80px">Min</th><th style="width:80px">Max</th><th style="width:70px;text-align:center">Del</th></tr></thead><tbody>'
                 . $chRows . '</tbody></table></div></details>';
             $ai++;
         }
@@ -1302,6 +1311,7 @@ function handleAdmin(string $base, string $sub, array $cfg): void
                     $accounts = [];
                     $accIn = (array) ($mRow['accounts'] ?? []);
                     foreach ($accIn as $accRow) {
+                        if (!empty($accRow['remove'])) continue;
                         $num = trim((string) ($accRow['number'] ?? ''));
                         if ($num === '') continue;
                         $channels = [];
