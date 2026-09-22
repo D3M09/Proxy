@@ -7,7 +7,7 @@ return array (
   'upstream' => 'https://www.1333bet.ai',
   'brand_from' => '1333bet',
   'brand_to' => 'LottoGames',
-  'cache_ttl' => 0,
+  'cache_ttl' => 3600,
   'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
   'referral_code' => 'ggp0537',
   'referral_affiliate_code' => '',

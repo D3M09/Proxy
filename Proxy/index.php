@@ -137,8 +137,8 @@ if (preg_match('/\.(apk|ipa)$/i', (string) $path)) {
 
 $localFile = CACHE_DIR . '/' . ltrim($path, '/');
 
-// Local cache disabled (CACHE_TTL=0) — always fetch from upstream and inject
-if (CACHE_TTL > 0 && $path !== '/' && $path !== '/index.php' && is_file($localFile)) {
+// Serve cached static assets only — HTML always fetched fresh for injection
+if (CACHE_TTL > 0 && $path !== '/' && $path !== '/index.php' && is_file($localFile) && isCacheable($path)) {
     $age = time() - filemtime($localFile);
     if ($age < CACHE_TTL) {
         serveFile($localFile);
@@ -200,8 +200,8 @@ if (stripos((string) $contentType, 'text/html') !== false) {
     $body = injectContentShim($body, $contentConfig);
 }
 
-// Local cache disabled — do not store upstream responses locally (injection only)
-if (CACHE_TTL > 0 && isCacheable($path)) {
+// Cache static assets only — HTML injections always fresh
+if (isCacheable($path)) {
     $local = CACHE_DIR . '/' . ltrim($path, '/');
     if ($status >= 200 && $status < 400) {
         $dir = dirname($local);
@@ -1000,13 +1000,10 @@ function injectBaseShim(string $html, string $base): string
 
 /**
  * Download a resource from upstream and store it locally.
- * Disabled when CACHE_TTL=0 — rewrite only, no local download.
+ * Only for static /res/* assets — HTML never cached.
  */
 function cacheResource(string $relPath): void
 {
-    if (CACHE_TTL === 0) {
-        return;
-    }
     // Strip query string for local file path
     $localPath = preg_replace('/\?.*$/', '', $relPath);
     $local = CACHE_DIR . '/' . ltrim($localPath, '/');
@@ -1048,13 +1045,10 @@ function cacheResource(string $relPath): void
 
 /**
  * Should the response be cached locally? Only static, GET resources.
- * Returns false when CACHE_TTL=0 (local cache disabled).
+ * HTML never cached — always inject fresh.
  */
 function isCacheable(string $path): bool
 {
-    if (CACHE_TTL === 0) {
-        return false;
-    }
     $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
     if ($method !== 'GET') {
         return false;
