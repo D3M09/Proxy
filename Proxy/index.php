@@ -247,6 +247,13 @@ if (stripos((string) $contentType, 'text/html') !== false) {
 }
 header('X-Proxy: true');
 header('Connection: close');
+if (stripos((string) $contentType, 'text/html') === false) {
+    // Allow browser caching for static assets (reduces repeat TTFB)
+    header('Cache-Control: public, max-age=86400, immutable');
+    header('X-Content-Type-Options: nosniff');
+} else {
+    header('Link: <' . UPSTREAM . '/res/css/vendor.163077c576135e6b923a.css>; rel=preload; as=style', false);
+}
 header('Content-Length: ' . strlen($body));
 echo $body;
 
@@ -330,7 +337,7 @@ function fetchUpstream(string $path): array|false
 
     // Retry on upstream 5xx / timeout (fixes "internet off" on slow /wps/*)
     $attempts = 0;
-    $maxAttempts = 3;
+    $maxAttempts = 2;
     $lastErr = '';
     $lastStatus = 0;
     $lastCt = false;
@@ -341,8 +348,8 @@ function fetchUpstream(string $path): array|false
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_MAXREDIRS      => 5,
-            CURLOPT_CONNECTTIMEOUT => 10,
-            CURLOPT_TIMEOUT        => 60,
+            CURLOPT_CONNECTTIMEOUT => 4,
+            CURLOPT_TIMEOUT        => 8,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_ENCODING       => '',
             CURLOPT_CUSTOMREQUEST  => $method,
@@ -350,7 +357,11 @@ function fetchUpstream(string $path): array|false
             CURLOPT_HTTPHEADER     => $headers,
             CURLOPT_HEADERFUNCTION => $collectHeaders,
             CURLOPT_TCP_KEEPALIVE  => 1,
+            CURLOPT_TCP_FASTOPEN   => 1,
+            CURLOPT_DNS_CACHE_TIMEOUT => 600,
             CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,
+            CURLOPT_FORBID_REUSE   => false,
+            CURLOPT_FRESH_CONNECT  => false,
         ] + upstreamHttpVersionOpt();
         $share = upstreamCurlShare();
         if ($share !== null) {
@@ -377,7 +388,7 @@ function fetchUpstream(string $path): array|false
         }
         $attempts++;
         if ($attempts < $maxAttempts) {
-            usleep(400000 * $attempts); // 0.4s, 0.8s backoff
+            usleep(100000 * $attempts); // 0.1s, 0.2s backoff (was 0.4s)
             $respHeaders = []; // reset for retry
         }
     } while ($attempts < $maxAttempts);
