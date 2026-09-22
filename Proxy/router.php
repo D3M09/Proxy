@@ -39,8 +39,17 @@ if ($uri === '/setup' || $uri === '/setup/' || $uri === '/setup.php') {
     return true;
 }
 
-// VoucherCenter (lives at project root, one level up from Proxy/)
+require_once __DIR__ . '/admin/store.php';
+$voucher = content_load()['voucher'] ?? [];
+
+// VoucherCenter custom only when ON — OFF = normal 404
 if ($uri === '/voucherCenter' || $uri === '/voucherCenter/' || strpos($uri, '/voucherCenter/') === 0) {
+    if (empty($voucher['enabled'])) {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo 'Voucher Center disabled';
+        return true;
+    }
     $vcFile = __DIR__ . '/..' . $uri;
     if ($uri === '/voucherCenter' || $uri === '/voucherCenter/' || $uri === '/voucherCenter/index.php') {
         require __DIR__ . '/../voucherCenter/index.php';

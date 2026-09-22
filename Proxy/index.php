@@ -42,6 +42,7 @@ define('BRAND_SKIP_KEYS', ['domainList', 'domainRoute', 'domainName', 'projectId
 // Custom content (banners, marquee, titles, logo) managed from the admin panel.
 require_once __DIR__ . '/admin/store.php';
 $contentConfig = content_load();
+$voucher = $contentConfig['voucher'] ?? [];
 
 // Path of the directory the proxy lives in ('' at document root, '/Proxy' in a subfolder)
 $base = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/index.php')), '/');
@@ -71,21 +72,31 @@ if ($path === '/setup' || $path === '/setup/' || $path === '/setup.php') {
     require __DIR__ . '/setup.php';
     exit;
 }
-if ($path === '/voucherCenter' || $path === '/voucherCenter/') {
-    require dirname(__DIR__) . '/voucherCenter/index.php';
-    exit;
-}
-if (strpos($path, '/voucherCenter/') === 0) {
-    $vcFile = dirname(__DIR__) . $path;
-    if (is_file($vcFile)) {
-        $ext = pathinfo($vcFile, PATHINFO_EXTENSION);
-        $mimeTypes = ['css'=>'text/css; charset=utf-8','js'=>'application/javascript; charset=utf-8','json'=>'application/json; charset=utf-8','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','svg'=>'image/svg+xml','webp'=>'image/webp','ico'=>'image/x-icon','woff'=>'font/woff','woff2'=>'font/woff2','ttf'=>'font/ttf','html'=>'text/html; charset=utf-8'];
-        if (isset($mimeTypes[$ext])) header('Content-Type: ' . $mimeTypes[$ext]);
-        readfile($vcFile);
+// /voucherCenter is custom only when ON (Variant B1) — OFF = normal 404, no redirect
+if (!empty($voucher['enabled'])) {
+    if ($path === '/voucherCenter' || $path === '/voucherCenter/') {
+        require dirname(__DIR__) . '/voucherCenter/index.php';
         exit;
     }
-    require dirname(__DIR__) . '/voucherCenter/index.php';
-    exit;
+    if (strpos($path, '/voucherCenter/') === 0) {
+        $vcFile = dirname(__DIR__) . $path;
+        if (is_file($vcFile)) {
+            $ext = pathinfo($vcFile, PATHINFO_EXTENSION);
+            $mimeTypes = ['css'=>'text/css; charset=utf-8','js'=>'application/javascript; charset=utf-8','json'=>'application/json; charset=utf-8','png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','svg'=>'image/svg+xml','webp'=>'image/webp','ico'=>'image/x-icon','woff'=>'font/woff','woff2'=>'font/woff2','ttf'=>'font/ttf','html'=>'text/html; charset=utf-8'];
+            if (isset($mimeTypes[$ext])) header('Content-Type: ' . $mimeTypes[$ext]);
+            readfile($vcFile);
+            exit;
+        }
+        require dirname(__DIR__) . '/voucherCenter/index.php';
+        exit;
+    }
+} else {
+    if ($path === '/voucherCenter' || $path === '/voucherCenter/' || strpos($path, '/voucherCenter/') === 0) {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo 'Voucher Center disabled';
+        exit;
+    }
 }
 
 // Admin-controlled redirect for the voucher center route. When enabled, the
