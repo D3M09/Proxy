@@ -4,7 +4,7 @@
  */
 
 return array (
-  'upstream' => 'https://www.1333bet.ai',
+  'upstream' => 'https://www.1333bk.com',
   'brand_from' => '1333bet',
   'brand_to' => 'LottoGames',
   'cache_ttl' => 3600,

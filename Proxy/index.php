@@ -396,33 +396,33 @@ function fetchUpstream(string $path): array|false
 function rewriteAndCache(string $html): string
 {
     // Pattern 1: Quoted attributes — src="/res/...", href='/res/...'
-    $quotedPattern = '/((?:src|href|content|poster|data-src|action)\s*=\s*)("|\')((?:https?:\/\/www\.1333bet\.ai)?\/res\/[^"\'\s>]+)\2/i';
+    $quotedPattern = '/((?:src|href|content|poster|data-src|action)\s*=\s*)("|\')((?:https?:\/\/[^\/]+)?\/res\/[^"\'\s>]+)\2/i';
 
     $html = preg_replace_callback($quotedPattern, function ($m) {
         $attr   = $m[1];
         $quote  = $m[2];
         $rawUrl = $m[3];
-        $relPath = preg_replace('#^https?://www\.1333bet\.ai#', '', $rawUrl);
+        $relPath = preg_replace('#^https?://[^/]+#', '', $rawUrl);
         cacheResource($relPath);
         $cleanPath = preg_replace('/\?.*$/', '', $relPath);
         return $attr . $quote . $cleanPath . $quote;
     }, $html);
 
     // Pattern 2: Unquoted attributes — href=/res/...
-    $unquotedPattern = '/((?:src|href|content|poster|data-src|action)\s*=\s*)((?:https?:\/\/www\.1333bet\.ai)?\/res\/[^\s>"\']+)/i';
+    $unquotedPattern = '/((?:src|href|content|poster|data-src|action)\s*=\s*)((?:https?:\/\/[^\/]+)?\/res\/[^\s>"\']+)/i';
 
     $html = preg_replace_callback($unquotedPattern, function ($m) {
         $attr   = $m[1];
         $rawUrl = $m[2];
-        $relPath = preg_replace('#^https?://www\.1333bet\.ai#', '', $rawUrl);
+        $relPath = preg_replace('#^https?://[^/]+#', '', $rawUrl);
         cacheResource($relPath);
         $cleanPath = preg_replace('/\?.*$/', '', $relPath);
         return $attr . $cleanPath;
     }, $html);
 
     // Also rewrite inline CSS url() references (e.g. background-image: url(/res/...))
-    $html = preg_replace_callback('/url\(\s*["\']?((?:https?:\/\/www\.1333bet\.ai)?\/res\/[^"\'\)]+)\)["\']?\s*/i', function ($m) {
-        $relPath = preg_replace('#^https?://www\.1333bet\.ai#', '', $m[1]);
+    $html = preg_replace_callback('/url\(\s*["\']?((?:https?:\/\/[^\/]+)?\/res\/[^"\'\)]+)\)["\']?\s*/i', function ($m) {
+        $relPath = preg_replace('#^https?://[^/]+#', '', $m[1]);
         cacheResource($relPath);
         $cleanPath = preg_replace('/\?.*$/', '', $relPath);
         return 'url(' . $cleanPath . ')';
