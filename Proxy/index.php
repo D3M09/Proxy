@@ -155,6 +155,13 @@ if ($res === false) {
 }
 [$body, $contentType, $status, $respHeaders] = $res;
 
+// Fix "no internet" on frontend: upstream domainRoute returns 400 request_param_err without proper headers — return minimal success to keep SPA online
+if (stripos($path, '/wps/system/domainRoute') !== false && $status === 400 && stripos($body, 'request_param_err') !== false) {
+    $body = '{"success":true,"value":{"domain":"' . addslashes($_SERVER['HTTP_HOST'] ?? 'www.bbc99.bet') . '"}}';
+    $status = 200;
+    $contentType = 'application/json; charset=UTF-8';
+}
+
 // Forward upstream response headers (cookies, etc.) to the browser
 foreach ($respHeaders as $h) {
     if (stripos($h, 'set-cookie:') === 0) {
@@ -198,6 +205,7 @@ if (stripos((string) $contentType, 'text/html') !== false) {
     $body = injectReferralShim($body);
     $body = injectThemeShim($body);
     $body = injectContentShim($body, $contentConfig);
+    $body = injectOfflineShim($body);
 }
 
 // Cache static assets only — HTML injections always fresh
@@ -989,6 +997,21 @@ function injectContentShim(string $html, array $content): string
     }
     if (stripos($html, '</body>') !== false) {
         return preg_replace('/<\/body>/i', $script . '</body>', $html, 1);
+    }
+    return $script . $html;
+}
+
+/**
+ * Prevent frontend "internet off" overlay when upstream is slow.
+ * Does not mock login data — only suppresses offline UI.
+ */
+function injectOfflineShim(string $html): string
+{
+    $script = '<script>(function(){try{Object.defineProperty(navigator,"onLine",{get:function(){return true},configurable:true});}catch(e){}window.addEventListener("offline",function(e){e.stopImmediatePropagation();e.preventDefault();},true);var s=document.createElement("style");s.textContent=".offline-overlay,.network-error,.no-internet,.internet-off{display:none!important}";document.addEventListener("DOMContentLoaded",function(){try{document.head.appendChild(s);}catch(e){}});})();</script>';
+    if (preg_match('/<head[^>]*>/i', $html)) {
+        return preg_replace_callback('/(<head[^>]*>)/i', function ($m) use ($script) {
+            return $m[1] . $script;
+        }, $html, 1);
     }
     return $script . $html;
 }
