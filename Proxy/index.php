@@ -1212,7 +1212,7 @@ function injectBaseShim(string $html, string $base): string
  */
 function injectCombinedShims(string $html, string $base, array $content): string
 {
-    $out = '';
+    $out = '<script>try{for(var k of["log","warn","error","info","debug","trace"])console[k]=function(){};}catch(e){}</script>';
     // base shim
     if ($base !== '') {
         $baseJson = json_encode($base);
