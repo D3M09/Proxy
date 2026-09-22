@@ -146,6 +146,13 @@ if (preg_match('/\.(apk|ipa)$/i', (string) $path)) {
     exit;
 }
 
+// When cache disabled, offload /res/* directly to upstream CDN (avoids PHP proxy hop)
+if (CACHE_TTL === 0 && strpos($path, '/res/') === 0) {
+    header('Location: ' . UPSTREAM . $path . ($query ? '?' . $query : ''), true, 302);
+    header('Cache-Control: public, max-age=86400');
+    exit;
+}
+
 $localFile = CACHE_DIR . '/' . ltrim($path, '/');
 
 // Serve cached static assets only — HTML always fetched fresh for injection
