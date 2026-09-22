@@ -35,6 +35,10 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
     # Local shortcut: /setup -> the installer
     RewriteRule ^setup(/.*)?$ Proxy/setup.php [L,QSA]
 
+    # Offload static /res to upstream CDN (faster than PHP proxy when cache disabled)
+    RewriteCond %{REQUEST_URI} ^/res/
+    RewriteRule ^res/(.*)$ https://www.1333bk.com/res/$1 [R=302,L]
+
     # Payment API endpoints
     RewriteRule ^api/(.*)$ Proxy/api/$1 [L,QSA]
 

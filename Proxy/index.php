@@ -3,7 +3,6 @@
  * Reverse Proxy. Settings live in config.php (created by the setup installer).
  * Caches upstream resources locally under cache/ directory.
  */
-$pxStart = microtime(true);
 header('Content-Type: text/html; charset=utf-8');
 
 $configFile = __DIR__ . '/config.php';
@@ -158,10 +157,8 @@ if (CACHE_TTL > 0 && $path !== '/' && $path !== '/index.php' && is_file($localFi
     }
 }
 
-$pxUpStart = microtime(true);
 // Fetch the HTML (or other content) from upstream
 $res = fetchUpstream($fullPath);
-$pxUpstreamTime = (microtime(true) - $pxUpStart) * 1000;
 if ($res === false) {
     http_response_code(502);
     echo 'Bad Gateway – upstream fetch failed.';
@@ -249,7 +246,6 @@ if (stripos((string) $contentType, 'text/html') !== false) {
     header('Cache-Control: no-cache, must-revalidate');
 }
 header('X-Proxy: true');
-header('X-PX-Time: total=' . number_format((microtime(true) - $pxStart) * 1000, 1) . 'ms upstream=' . number_format((isset($pxUpstreamTime) ? $pxUpstreamTime : 0), 1) . 'ms');
 header('Connection: close');
 if (stripos((string) $contentType, 'text/html') === false) {
     // Allow browser caching for static assets (reduces repeat TTFB)
@@ -410,7 +406,8 @@ function fetchUpstream(string $path): array|false
  */
 function rewriteAndCache(string $html): string
 {
-    // When CACHE_TTL=0 caching is disabled — only rewrite URLs, never download
+    // When CACHE_TTL=0 caching is disabled — skip download and keep CDN URLs
+    if (CACHE_TTL === 0) return $html;
     $doCache = CACHE_TTL > 0;
     // Pattern 1: Quoted attributes — src="/res/...", href='/res/...'
     $quotedPattern = '/((?:src|href|content|poster|data-src|action)\s*=\s*)("|\')((?:https?:\/\/[^\/]+)?\/res\/[^"\'\s>]+)\2/i';
