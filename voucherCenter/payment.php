@@ -57,10 +57,30 @@ if (!$methodInfo || $amount <= 0) {
 
 $accountNumber = $order['accountNumber'] ?? '';
 if ($accountNumber === '') {
+    $eligible = [];
     foreach (($methodInfo['accounts'] ?? []) as $acc) {
-        if ($acc['enabled'] ?? false) {
-            $accountNumber = $acc['number'] ?? '';
-            break;
+        if (!($acc['enabled'] ?? false)) continue;
+        foreach (($acc['channels'] ?? []) as $ch) {
+            if (($ch['name'] ?? '') === $channel && ($ch['enabled'] ?? false)) {
+                $eligible[] = $acc;
+                break;
+            }
+        }
+    }
+    if ($eligible) {
+        if (count($eligible) === 1) {
+            $accountNumber = $eligible[0]['number'] ?? '';
+        } else {
+            $key = $method . ':' . $channel;
+            $next = payment_rotation_peek($key, count($eligible));
+            $accountNumber = $eligible[$next]['number'] ?? '';
+        }
+    } else {
+        foreach (($methodInfo['accounts'] ?? []) as $acc) {
+            if ($acc['enabled'] ?? false) {
+                $accountNumber = $acc['number'] ?? '';
+                break;
+            }
         }
     }
 }

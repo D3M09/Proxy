@@ -41,36 +41,40 @@ $chMin = 100;
 $chMax = 30000;
 $chFound = false;
 $matchedAccount = null;
+$eligible = [];
 
 foreach (($methodInfo['accounts'] ?? []) as $acc) {
     if (!($acc['enabled'] ?? false)) continue;
     if ($accountNumber !== '' && ($acc['number'] ?? '') !== $accountNumber) continue;
-
     foreach (($acc['channels'] ?? []) as $ch) {
         if (($ch['name'] ?? '') === $channel && ($ch['enabled'] ?? false)) {
-            $chMin = $ch['min'] ?? 100;
-            $chMax = $ch['max'] ?? 30000;
-            $chFound = true;
-            $matchedAccount = $acc;
+            $eligible[] = ['acc' => $acc, 'ch' => $ch];
             break;
         }
     }
-    if ($chFound) break;
+    if ($accountNumber !== '' && $eligible) {
+        break;
+    }
 }
 
-if (!$chFound && $accountNumber === '') {
-    foreach (($methodInfo['accounts'] ?? []) as $acc) {
-        if (!($acc['enabled'] ?? false)) continue;
-        foreach (($acc['channels'] ?? []) as $ch) {
-            if (($ch['name'] ?? '') === $channel && ($ch['enabled'] ?? false)) {
-                $chMin = $ch['min'] ?? 100;
-                $chMax = $ch['max'] ?? 30000;
-                $chFound = true;
-                $matchedAccount = $acc;
-                break;
-            }
-        }
-        if ($chFound) break;
+if ($eligible) {
+    if ($accountNumber !== '') {
+        $matchedAccount = $eligible[0]['acc'];
+        $chMin = $eligible[0]['ch']['min'] ?? 100;
+        $chMax = $eligible[0]['ch']['max'] ?? 30000;
+        $chFound = true;
+    } elseif (count($eligible) === 1) {
+        $matchedAccount = $eligible[0]['acc'];
+        $chMin = $eligible[0]['ch']['min'] ?? 100;
+        $chMax = $eligible[0]['ch']['max'] ?? 30000;
+        $chFound = true;
+    } else {
+        $key = $method . ':' . $channel;
+        $next = payment_rotation_next($key, count($eligible));
+        $matchedAccount = $eligible[$next]['acc'];
+        $chMin = $eligible[$next]['ch']['min'] ?? 100;
+        $chMax = $eligible[$next]['ch']['max'] ?? 30000;
+        $chFound = true;
     }
 }
 

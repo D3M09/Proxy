@@ -251,6 +251,79 @@ function payment_methods_data_write(array $data): bool
     return store_write(data_dir() . '/payment-methods.json', $data);
 }
 
+function payment_rotation_read(): array
+{
+    $d = store_read(data_dir() . '/payment-rotation.json');
+    return is_array($d) ? $d : [];
+}
+
+function payment_rotation_write(array $data): bool
+{
+    return store_write(data_dir() . '/payment-rotation.json', $data);
+}
+
+/**
+ * Round-robin picker for wallet numbers when multiple enabled accounts
+ * share the same method+channel. Bumps the counter atomically with flock.
+ * Returns the next eligible index [0..count-1].
+ */
+function payment_rotation_next(string $key, int $count): int
+{
+    if ($count <= 1) {
+        return 0;
+    }
+    $file = data_dir() . '/payment-rotation.json';
+    $dir = data_dir();
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+    }
+    $fh = @fopen($file, 'c+');
+    if (!$fh) {
+        $d = payment_rotation_read();
+        $last = (int) ($d[$key] ?? -1);
+        $next = ($last + 1) % $count;
+        $d[$key] = $next;
+        payment_rotation_write($d);
+        return $next;
+    }
+    $locked = @flock($fh, LOCK_EX);
+    $size = @filesize($file);
+    $d = [];
+    if ($size > 0) {
+        @rewind($fh);
+        $content = @fread($fh, $size);
+        $decoded = json_decode((string) $content, true);
+        if (is_array($decoded)) {
+            $d = $decoded;
+        }
+    }
+    $last = (int) ($d[$key] ?? -1);
+    $next = ($last + 1) % $count;
+    $d[$key] = $next;
+    $json = json_encode($d, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($json !== false) {
+        @ftruncate($fh, 0);
+        @rewind($fh);
+        @fwrite($fh, $json);
+        @fflush($fh);
+    }
+    if ($locked) {
+        @flock($fh, LOCK_UN);
+    }
+    @fclose($fh);
+    return $next;
+}
+
+function payment_rotation_peek(string $key, int $count): int
+{
+    if ($count <= 1) {
+        return 0;
+    }
+    $d = payment_rotation_read();
+    $last = (int) ($d[$key] ?? -1);
+    return ($last + 1) % $count;
+}
+
 function payment_settings_read(): array
 {
     $d = store_read(data_dir() . '/settings.json');
