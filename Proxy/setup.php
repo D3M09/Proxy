@@ -56,6 +56,7 @@ function setup_test_upstream(string $url, string $ua): array
         CURLOPT_ENCODING       => '',
         CURLOPT_USERAGENT      => $ua !== '' ? $ua : 'Mozilla/5.0',
         CURLOPT_HTTPHEADER     => ['Accept: text/html,*/*'],
+        CURLOPT_HTTP_VERSION   => defined('CURL_HTTP_VERSION_2TLS') ? CURL_HTTP_VERSION_2TLS : CURL_HTTP_VERSION_2_0,
     ]);
     curl_exec($ch);
     $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);

@@ -249,6 +249,29 @@ function clientUserAgent(): string
     return $ua !== '' ? $ua : USER_AGENT;
 }
 
+/** Shared curl handle so upstream fetches reuse one TCP+TLS connection per PHP request. */
+function upstreamCurlShare()
+{
+    static $sh = null;
+    if ($sh !== null) {
+        return $sh;
+    }
+    if (!function_exists('curl_share_init')) {
+        return null;
+    }
+    $sh = curl_share_init();
+    curl_share_setopt($sh, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
+    curl_share_setopt($sh, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION);
+    return $sh;
+}
+
+/** Prefer HTTP/2 to upstream (Cloudflare supports it); falls back to 1.1 automatically. */
+function upstreamHttpVersionOpt(): array
+{
+    $v = defined('CURL_HTTP_VERSION_2TLS') ? CURL_HTTP_VERSION_2TLS : CURL_HTTP_VERSION_2_0;
+    return [CURLOPT_HTTP_VERSION => $v];
+}
+
 /**
  * Fetch a path from upstream, forwarding the original HTTP method,
  * body and relevant headers. Returns [body, contentType, statusCode, headers].
@@ -313,7 +336,11 @@ function fetchUpstream(string $path): array|false
             CURLOPT_HEADERFUNCTION => $collectHeaders,
             CURLOPT_TCP_KEEPALIVE  => 1,
             CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,
-        ];
+        ] + upstreamHttpVersionOpt();
+        $share = upstreamCurlShare();
+        if ($share !== null) {
+            $opts[CURLOPT_SHARE] = $share;
+        }
         if ($method === 'POST' || $method === 'PUT' || $method === 'PATCH' || $method === 'DELETE') {
             $raw = file_get_contents('php://input');
             if ($raw !== '' && $raw !== false) {
@@ -1068,7 +1095,7 @@ function cacheResource(string $relPath): void
     // Fetch with original path (including query string for cache busting)
     $url = UPSTREAM . $relPath;
     $ch = curl_init($url);
-    curl_setopt_array($ch, [
+    $opts = [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS      => 5,
@@ -1083,7 +1110,12 @@ function cacheResource(string $relPath): void
             'Accept: */*',
             'Referer: ' . UPSTREAM . '/',
         ],
-    ]);
+    ] + upstreamHttpVersionOpt();
+    $share = upstreamCurlShare();
+    if ($share !== null) {
+        $opts[CURLOPT_SHARE] = $share;
+    }
+    curl_setopt_array($ch, $opts);
     $data = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
