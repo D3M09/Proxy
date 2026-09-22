@@ -146,11 +146,10 @@ if (preg_match('/\.(apk|ipa)$/i', (string) $path)) {
     exit;
 }
 
-// When cache disabled, offload /res/* directly to upstream CDN (avoids PHP proxy hop)
-if (CACHE_TTL === 0 && stripos($_SERVER['REQUEST_URI'] ?? '', '/res/') !== false) {
+// Offload /res/* directly to upstream CDN (avoids PHP proxy hop) — always, regardless of cache
+if (stripos($_SERVER['REQUEST_URI'] ?? '', '/res/') !== false) {
     $q = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_QUERY);
     $p = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? $path;
-    // normalize to /res/... path
     if (preg_match('~/res/.*~i', $p, $m)) $p = $m[0];
     header('Location: ' . UPSTREAM . $p . ($q ? '?' . $q : ''), true, 302);
     header('Cache-Control: public, max-age=86400');
