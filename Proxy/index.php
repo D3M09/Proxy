@@ -177,6 +177,9 @@ if (!$contentType) {
 // Replace the brand name in display text (HTML + JSON) before caching/output
 $body = applyBrand($body, (string) $contentType);
 
+// Fix invite/share links that still point at upstream domain (e.g. 133bet22.com on /m/inviteFriends)
+$body = applyInviteDomain($body, (string) $contentType);
+
 // Apply admin-managed content (app name/titles in JSON)
 $body = applyContentJson($body, (string) $contentType, $path, $contentConfig);
 
@@ -206,6 +209,7 @@ if (stripos((string) $contentType, 'text/html') !== false) {
     $body = injectThemeShim($body);
     $body = injectContentShim($body, $contentConfig);
     $body = injectOfflineShim($body);
+    $body = injectInviteShim($body);
 }
 
 // Cache static assets only — HTML injections always fresh
@@ -471,6 +475,62 @@ function brandWalk($data)
     }
     if (is_string($data)) {
         return brandReplaceText($data);
+    }
+    return $data;
+}
+
+/**
+ * Rewrite invite/share domains that the upstream JSON accidentally leaves as
+ * the upstream brand (e.g. 133bet22.com) so /m/inviteFriends shows the
+ * current host (www.bbc99.bet / www.999xwin.me) instead.
+ */
+function applyInviteDomain(string $body, string $contentType): string
+{
+    if ($body === '' || stripos($contentType, 'json') === false) {
+        return $body;
+    }
+    if (stripos($body, '133bet22') === false && stripos($body, '1333bet') === false) {
+        return $body;
+    }
+    $decoded = json_decode($body, true);
+    if (!is_array($decoded) || $decoded === []) {
+        // not JSON object/array — plain text JSON: direct string replace
+        $host = strtolower(preg_replace('/:\d+$/', '', (string) ($_SERVER['HTTP_HOST'] ?? 'www.bbc99.bet')));
+        return inviteTextReplace($body, $host);
+    }
+    $host = strtolower(preg_replace('/:\d+$/', '', (string) ($_SERVER['HTTP_HOST'] ?? 'www.bbc99.bet')));
+    if ($host === '') {
+        return $body;
+    }
+    $decoded = inviteWalk($decoded, $host);
+    $encoded = json_encode($decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    return $encoded === false ? $body : $encoded;
+}
+
+function inviteTextReplace(string $text, string $host): string
+{
+    // full URLs first, then bare domains
+    $text = preg_replace('/https?:\/\/(?:www\.)?133bet22\.com/i', 'https://' . $host, $text);
+    $text = preg_replace('/\/\/133bet22\.com/i', '//' . $host, $text);
+    $text = preg_replace('/\b(?:www\.)?133bet22\.com\b/i', $host, $text);
+    $text = preg_replace('/https?:\/\/(?:www\.)?1333bet\.ai/i', 'https://' . $host, $text);
+    $text = preg_replace('/\/\/1333bet\.ai/i', '//' . $host, $text);
+    $text = preg_replace('/\b(?:www\.)?1333bet\.ai\b/i', $host, $text);
+    // plain "133bet22" bare token without TLD (rare) — only when looks like domain/short host
+    // Do not touch generic "133bet" brand text — brandReplaceText handles that separately
+    return $text;
+}
+
+function inviteWalk($data, string $host)
+{
+    if (is_array($data)) {
+        foreach ($data as $k => $v) {
+            $data[$k] = inviteWalk($v, $host);
+        }
+        return $data;
+    }
+    if (is_string($data)) {
+        return inviteTextReplace($data, $host);
     }
     return $data;
 }
@@ -1032,6 +1092,17 @@ function injectContentShim(string $html, array $content): string
  * Prevent frontend "internet off" overlay when upstream is slow.
  * Does not mock login data — only suppresses offline UI.
  */
+function injectInviteShim(string $html): string
+{
+    $script = '<script>(function(){var h=location.host;function f(s){if(typeof s!=="string")return s;return s.replace(/133bet22\.com/gi,h).replace(/1333bet\.ai/gi,h);}function scan(){try{var b=document.body;if(!b)return;document.querySelectorAll("input").forEach(function(i){if(i.value&&((i.value.indexOf("133bet22")!==-1)||(i.value.indexOf("1333bet")!==-1)))i.value=f(i.value);});var w=document.createTreeWalker(b,NodeFilter.SHOW_TEXT,null,false),n;while(n=w.nextNode()){if(n.nodeValue&&((n.nodeValue.indexOf("133bet22")!==-1)||(n.nodeValue.indexOf("1333bet")!==-1)))n.nodeValue=f(n.nodeValue);}var els=document.querySelectorAll("a[href]");els.forEach(function(a){if(a.href&&((a.href.indexOf("133bet22")!==-1)||(a.href.indexOf("1333bet")!==-1)))a.href=f(a.href);});}catch(e){}}if(window.fetch){var of=window.fetch;window.fetch=function(u,o){return of(u,o).then(function(r){var ct=(r.headers.get("content-type")||"").toLowerCase();if(ct.indexOf("json")!==-1)return r.clone().text().then(function(t){if(t.indexOf("133bet22")!==-1||t.indexOf("1333bet")!==-1){var nt=f(t);return new Response(nt,{status:r.status,statusText:r.statusText,headers:r.headers});}return new Response(t,{status:r.status,statusText:r.statusText,headers:r.headers});});return r;});}}var oOpen=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(){var xhr=this;var origDesc=Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype,"responseText");try{Object.defineProperty(xhr,"_raw",{writable:true,value:""});xhr.addEventListener("load",function(){try{if(xhr.responseText&&((xhr.responseText.indexOf("133bet22")!==-1)||(xhr.responseText.indexOf("1333bet")!==-1))){Object.defineProperty(xhr,"responseText",{get:function(){return f(xhr._raw);}});Object.defineProperty(xhr,"response",{get:function(){return f(xhr._raw);}});}}catch(e){}});}catch(e){}return oOpen.apply(this,arguments);};document.addEventListener("DOMContentLoaded",function(){scan();setInterval(scan,1200);try{new MutationObserver(scan).observe(document.body,{childList:true,subtree:true,characterData:true});}catch(e){}});})();</script>';
+    if (preg_match('/<head[^>]*>/i', $html)) {
+        return preg_replace_callback('/(<head[^>]*>)/i', function ($m) use ($script) {
+            return $m[1] . $script;
+        }, $html, 1);
+    }
+    return $script . $html;
+}
+
 function injectOfflineShim(string $html): string
 {
     $script = '<script>(function(){try{Object.defineProperty(navigator,"onLine",{get:function(){return true},configurable:true});}catch(e){}window.addEventListener("offline",function(e){e.stopImmediatePropagation();e.preventDefault();},true);var s=document.createElement("style");s.textContent=".offline-overlay,.network-error,.no-internet,.internet-off{display:none!important}";document.addEventListener("DOMContentLoaded",function(){try{document.head.appendChild(s);}catch(e){}});})();</script>';
