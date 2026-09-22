@@ -3,6 +3,7 @@
  * Reverse Proxy. Settings live in config.php (created by the setup installer).
  * Caches upstream resources locally under cache/ directory.
  */
+$pxStart = microtime(true);
 header('Content-Type: text/html; charset=utf-8');
 
 $configFile = __DIR__ . '/config.php';
@@ -157,8 +158,10 @@ if (CACHE_TTL > 0 && $path !== '/' && $path !== '/index.php' && is_file($localFi
     }
 }
 
+$pxUpStart = microtime(true);
 // Fetch the HTML (or other content) from upstream
 $res = fetchUpstream($fullPath);
+$pxUpstreamTime = (microtime(true) - $pxUpStart) * 1000;
 if ($res === false) {
     http_response_code(502);
     echo 'Bad Gateway – upstream fetch failed.';
@@ -247,6 +250,7 @@ if (stripos((string) $contentType, 'text/html') !== false) {
 }
 header('X-Proxy: true');
 header('Connection: close');
+header('Server-Timing: total;dur=' . number_format((microtime(true) - $pxStart) * 1000, 1) . ', upstream;dur=' . number_format((isset($pxUpstreamTime) ? $pxUpstreamTime : 0), 1));
 if (stripos((string) $contentType, 'text/html') === false) {
     // Allow browser caching for static assets (reduces repeat TTFB)
     header('Cache-Control: public, max-age=86400, immutable');
