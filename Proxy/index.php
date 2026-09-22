@@ -223,8 +223,8 @@ if (stripos((string) $contentType, 'text/html') !== false) {
     $body = injectInviteShim($body);
 }
 
-// Cache static assets only — HTML injections always fresh
-if (isCacheable($path)) {
+// Cache disabled via CACHE_TTL=0 — never write to disk
+if (CACHE_TTL > 0 && isCacheable($path)) {
     $local = CACHE_DIR . '/' . ltrim($path, '/');
     if ($status >= 200 && $status < 400) {
         $dir = dirname($local);
@@ -395,15 +395,17 @@ function fetchUpstream(string $path): array|false
  */
 function rewriteAndCache(string $html): string
 {
+    // When CACHE_TTL=0 caching is disabled — only rewrite URLs, never download
+    $doCache = CACHE_TTL > 0;
     // Pattern 1: Quoted attributes — src="/res/...", href='/res/...'
     $quotedPattern = '/((?:src|href|content|poster|data-src|action)\s*=\s*)("|\')((?:https?:\/\/[^\/]+)?\/res\/[^"\'\s>]+)\2/i';
 
-    $html = preg_replace_callback($quotedPattern, function ($m) {
+    $html = preg_replace_callback($quotedPattern, function ($m) use ($doCache) {
         $attr   = $m[1];
         $quote  = $m[2];
         $rawUrl = $m[3];
         $relPath = preg_replace('#^https?://[^/]+#', '', $rawUrl);
-        cacheResource($relPath);
+        if ($doCache) cacheResource($relPath);
         $cleanPath = preg_replace('/\?.*$/', '', $relPath);
         return $attr . $quote . $cleanPath . $quote;
     }, $html);
@@ -411,19 +413,19 @@ function rewriteAndCache(string $html): string
     // Pattern 2: Unquoted attributes — href=/res/...
     $unquotedPattern = '/((?:src|href|content|poster|data-src|action)\s*=\s*)((?:https?:\/\/[^\/]+)?\/res\/[^\s>"\']+)/i';
 
-    $html = preg_replace_callback($unquotedPattern, function ($m) {
+    $html = preg_replace_callback($unquotedPattern, function ($m) use ($doCache) {
         $attr   = $m[1];
         $rawUrl = $m[2];
         $relPath = preg_replace('#^https?://[^/]+#', '', $rawUrl);
-        cacheResource($relPath);
+        if ($doCache) cacheResource($relPath);
         $cleanPath = preg_replace('/\?.*$/', '', $relPath);
         return $attr . $cleanPath;
     }, $html);
 
     // Also rewrite inline CSS url() references (e.g. background-image: url(/res/...))
-    $html = preg_replace_callback('/url\(\s*["\']?((?:https?:\/\/[^\/]+)?\/res\/[^"\'\)]+)\)["\']?\s*/i', function ($m) {
+    $html = preg_replace_callback('/url\(\s*["\']?((?:https?:\/\/[^\/]+)?\/res\/[^"\'\)]+)\)["\']?\s*/i', function ($m) use ($doCache) {
         $relPath = preg_replace('#^https?://[^/]+#', '', $m[1]);
-        cacheResource($relPath);
+        if ($doCache) cacheResource($relPath);
         $cleanPath = preg_replace('/\?.*$/', '', $relPath);
         return 'url(' . $cleanPath . ')';
     }, $html);
@@ -1160,6 +1162,7 @@ function injectBaseShim(string $html, string $base): string
  */
 function cacheResource(string $relPath): void
 {
+    if (CACHE_TTL === 0) return; // cache disabled
     // Strip query string for local file path
     $localPath = preg_replace('/\?.*$/', '', $relPath);
     $local = CACHE_DIR . '/' . ltrim($localPath, '/');
@@ -1213,6 +1216,7 @@ function cacheResource(string $relPath): void
  */
 function isCacheable(string $path): bool
 {
+    if (CACHE_TTL === 0) return false;
     $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
     if ($method !== 'GET') {
         return false;
