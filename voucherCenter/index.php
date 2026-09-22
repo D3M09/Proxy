@@ -8,7 +8,8 @@ require_once __DIR__ . '/../Proxy/admin/store.php';
 require_once __DIR__ . '/../Proxy/admin/includes/functions.php';
 
 $settings = payment_settings_read();
-$brandTo = (string) ($settings['brandName'] ?? '');
+$contentCfg = content_load();
+$brandTo = (string) ($settings['brandName'] ?? $contentCfg['titles']['web_title'] ?? $contentCfg['titles']['app_name'] ?? '');
 
 $html = @file_get_contents(__DIR__ . '/index.html');
 if ($html === false) {
@@ -39,11 +40,11 @@ if ($brandTo !== '') {
     }
 }
 
-$platformName = $settings['platformName'] ?? 'VoucherCenter';
+$platformName = $contentCfg['titles']['web_title'] ?? $contentCfg['titles']['app_name'] ?? $settings['platformName'] ?? 'VoucherCenter';
 $tEsc = htmlspecialchars($platformName, ENT_QUOTES);
 $html = preg_replace('/<title>.*?<\/title>/is', '<title>' . $tEsc . '</title>', $html, 1);
 
-$favicon = trim((string) ($settings['favicon'] ?? ''));
+$favicon = trim((string) ($settings['favicon'] ?? $contentCfg['favicon']['url'] ?? ''));
 if ($favicon !== '') {
     $fEsc = htmlspecialchars($favicon, ENT_QUOTES);
     $html = preg_replace_callback('/<link\b[^>]*\brel="[^"]*icon[^"]*"[^>]*>/i', function ($m) use ($fEsc) {
@@ -225,7 +226,7 @@ $html = preg_replace('/\sdata-savepage-href="[^"]*"/i', '', $html);
 $html = preg_replace('/<meta\s+name="savepage-[^"]*"[^>]*>/i', '', $html);
 $html = preg_replace('/<meta\s+name="savepage-from"[^>]*>/i', '', $html);
 
-$logo = trim((string) ($settings['logo'] ?? ''));
+$logo = trim((string) ($settings['logo'] ?? $contentCfg['logo']['url'] ?? ''));
 if ($logo !== '') {
     $logoJson = $jenc($logo);
     $logoScript = '<script>(function(){var L=' . $logoJson . ';if(!L)return;'

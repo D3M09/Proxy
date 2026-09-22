@@ -38,10 +38,11 @@ $amount = $order['amount'];
 $channel = $order['paymentChannel'];
 
 $settings = payment_settings_read();
+$contentCfg = content_load();
 $pmData = payment_methods_data_read();
 $methods = $pmData['methods'] ?? [];
 $currency = $settings['currency'] ?? 'BDT';
-$brandName = $settings['brandName'] ?? $settings['platformName'] ?? 'VoucherCenter';
+$brandName = $contentCfg['titles']['web_title'] ?? $contentCfg['titles']['app_name'] ?? $settings['brandName'] ?? $settings['platformName'] ?? 'VoucherCenter';
 
 $methodInfo = $methods[$method] ?? null;
 if (!$methodInfo || $amount <= 0) {
