@@ -71,12 +71,12 @@ $methodLabels = [
     'ROCKET' => 'Rocket', 'USDT' => 'USDT',
 ];
 $methodBankImages = [
-    'BKASH' => '/images/banks/bKash.png',
-    'BKASHSM' => '/images/banks/bKash.png',
-    'NAGAD' => '/images/banks/Nagad.png',
-    'NAGADSM' => '/images/banks/Nagad.png',
-    'ROCKET' => '/images/banks/RocketNew.png',
-    'USDT' => '',
+    'BKASH' => '/voucherCenter/BKASH/BN_2_20240312225413337.png',
+    'BKASHSM' => '/voucherCenter/BKASHSM/BN_1_20260711012519510.png',
+    'NAGAD' => '/voucherCenter/NAGAD/BN_2_20240312230148421.png',
+    'NAGADSM' => '/voucherCenter/NAGADSM/BN_1_20260711012544019.png',
+    'ROCKET' => '/voucherCenter/ROCKET/BN_2_20240312230029166.png',
+    'USDT' => '/voucherCenter/USDT/786_CN_1.png',
 ];
 
 $methodColor = $methodColors[$method] ?? '#006644';
