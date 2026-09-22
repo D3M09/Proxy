@@ -4,7 +4,10 @@
  * Caches upstream resources locally under cache/ directory.
  */
 header('Content-Type: text/html; charset=utf-8');
+if (function_exists('opcache_reset')) @opcache_reset();
+if (function_exists('opcache_invalidate')) @opcache_invalidate(__FILE__, true);
 header('X-Top-Test: 1');
+header('X-Opcache-Reset: 1');
 
 $configFile = __DIR__ . '/config.php';
 if (!is_file($configFile)) {
