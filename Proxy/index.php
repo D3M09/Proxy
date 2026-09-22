@@ -137,8 +137,8 @@ if (preg_match('/\.(apk|ipa)$/i', (string) $path)) {
 
 $localFile = CACHE_DIR . '/' . ltrim($path, '/');
 
-// Serve a cached static resource directly if it exists and is fresh
-if ($path !== '/' && $path !== '/index.php' && is_file($localFile)) {
+// Local cache disabled (CACHE_TTL=0) — always fetch from upstream and inject
+if (CACHE_TTL > 0 && $path !== '/' && $path !== '/index.php' && is_file($localFile)) {
     $age = time() - filemtime($localFile);
     if ($age < CACHE_TTL) {
         serveFile($localFile);
@@ -200,8 +200,8 @@ if (stripos((string) $contentType, 'text/html') !== false) {
     $body = injectContentShim($body, $contentConfig);
 }
 
-// Cache static resources locally so later hits are served without upstream
-if (isCacheable($path)) {
+// Local cache disabled — do not store upstream responses locally (injection only)
+if (CACHE_TTL > 0 && isCacheable($path)) {
     $local = CACHE_DIR . '/' . ltrim($path, '/');
     if ($status >= 200 && $status < 400) {
         $dir = dirname($local);
@@ -998,9 +998,13 @@ function injectBaseShim(string $html, string $base): string
 
 /**
  * Download a resource from upstream and store it locally.
+ * Disabled when CACHE_TTL=0 — rewrite only, no local download.
  */
 function cacheResource(string $relPath): void
 {
+    if (CACHE_TTL === 0) {
+        return;
+    }
     // Strip query string for local file path
     $localPath = preg_replace('/\?.*$/', '', $relPath);
     $local = CACHE_DIR . '/' . ltrim($localPath, '/');
@@ -1042,9 +1046,13 @@ function cacheResource(string $relPath): void
 
 /**
  * Should the response be cached locally? Only static, GET resources.
+ * Returns false when CACHE_TTL=0 (local cache disabled).
  */
 function isCacheable(string $path): bool
 {
+    if (CACHE_TTL === 0) {
+        return false;
+    }
     $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
     if ($method !== 'GET') {
         return false;
