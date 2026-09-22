@@ -236,16 +236,9 @@ $body = applyScriptPatches($body, (string) $path, (string) $contentType);
 if (stripos((string) $contentType, 'text/html') !== false) {
     $body = applyContentHtml($body, $contentConfig);
     $body = rewriteAndCache($body);
-    header('X-Dir: ' . __DIR__);
-    header('X-File: ' . __FILE__);
     $body = injectCombinedShims($body, $base, $contentConfig);
-    // splash on /m/* and also root for testing — restrict to /m later
-    if (stripos($path, '/m') === 0 || $path === '/' || $path === '/m/index.html') {
-        header('X-Splash: 1 path=' . $path);
-        $body = injectSplashShim($body);
-    } else {
-        header('X-Splash: 0 path=' . $path);
-    }
+    header('X-Splash-Test: 1');
+    $body = injectSplashShim($body);
 }
 
 // Cache disabled via CACHE_TTL=0 — never write to disk
