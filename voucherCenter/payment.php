@@ -42,7 +42,9 @@ $contentCfg = content_load();
 $pmData = payment_methods_data_read();
 $methods = $pmData['methods'] ?? [];
 $currency = $settings['currency'] ?? 'BDT';
-$brandName = $contentCfg['titles']['web_title'] ?? $contentCfg['titles']['app_name'] ?? $settings['brandName'] ?? $settings['platformName'] ?? 'VoucherCenter';
+$tmpBrand = trim((string) ($contentCfg['titles']['web_title'] ?? $contentCfg['titles']['app_name'] ?? ''));
+if ($tmpBrand === '') $tmpBrand = trim((string) ($settings['brandName'] ?? $settings['platformName'] ?? 'VoucherCenter'));
+$brandName = $tmpBrand;
 
 $methodInfo = $methods[$method] ?? null;
 if (!$methodInfo || $amount <= 0) {
