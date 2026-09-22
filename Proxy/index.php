@@ -223,6 +223,8 @@ if (stripos((string) $contentType, 'text/html') !== false) {
     header('Cache-Control: no-cache, must-revalidate');
 }
 header('X-Proxy: true');
+header('Connection: close');
+header('Content-Length: ' . strlen($body));
 echo $body;
 
 /* ------------------------------------------------------------------ */
@@ -1103,6 +1105,7 @@ function serveFile(string $file): void
     header('Content-Type: ' . $mime);
     header('Cache-Control: ' . ($isHtml ? 'no-cache, must-revalidate' : 'public, max-age=' . CACHE_TTL));
     header('X-Proxy-Cache: HIT');
+    header('Connection: close');
 
     $data = file_get_contents($file);
     if ($data === false) {
@@ -1117,5 +1120,6 @@ function serveFile(string $file): void
         $data = injectReferralShim($data);
         $data = injectThemeShim($data);
     }
+    header('Content-Length: ' . strlen($data));
     echo $data;
 }
