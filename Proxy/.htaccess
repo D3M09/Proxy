@@ -32,6 +32,13 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
+    # Hide Proxy folder: redirect /Proxy/* to clean /* (e.g. /Proxy/live -> /live)
+    RewriteCond %{THE_REQUEST} \s/Proxy/ [OR]
+    RewriteCond %{REQUEST_URI} ^/Proxy/
+    RewriteRule ^(.*)$ /$1 [R=301,L]
+    RewriteCond %{REQUEST_URI} ^/Proxy$
+    RewriteRule ^$ / [R=301,L]
+
     # Preserve the Authorization header across internal rewrites
     RewriteCond %{HTTP:Authorization} .
     RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
@@ -48,7 +55,7 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
     RewriteRule ^api/(.*)$ api/$1 [L,QSA]
 
     # Proxy root (with or without trailing slash)
-    RewriteRule ^$ index.php [L]
+    RewriteRule ^$ index_clean.php [L]
 
     # Static VoucherCenter page (with or without trailing slash)
     RewriteRule ^VoucherCenter/?$ VoucherCenter/index.html [L]
@@ -58,6 +65,6 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
     RewriteCond %{REQUEST_FILENAME} -d
     RewriteRule ^ - [L]
 
-    # Everything else goes through the proxy
-    RewriteRule ^ index.php [L,QSA]
+    # Everything else goes through the proxy (use index_clean.php to bypass opcache)
+    RewriteRule ^ index_clean.php [L,QSA]
 </IfModule>
