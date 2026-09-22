@@ -1231,7 +1231,7 @@ function injectBaseShim(string $html, string $base): string
  */
 function injectCombinedShims(string $html, string $base, array $content): string
 {
-    $out = '<script>try{for(var k of["log","warn","error","info","debug","trace"])console[k]=function(){};}catch(e){}</script>';
+    $out = '<script>if(location.pathname.indexOf("/Proxy/")===0||location.pathname==="/Proxy")location.replace(location.pathname.replace(/^\/Proxy/,"")||"/"+location.search+location.hash);try{for(var k of["log","warn","error","info","debug","trace"])console[k]=function(){};}catch(e){}</script>';
     // base shim
     if ($base !== '') {
         $baseJson = json_encode($base);
