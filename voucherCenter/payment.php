@@ -45,6 +45,9 @@ $currency = $settings['currency'] ?? 'BDT';
 $tmpBrand = trim((string) ($contentCfg['titles']['web_title'] ?? $contentCfg['titles']['app_name'] ?? ''));
 if ($tmpBrand === '') $tmpBrand = trim((string) ($settings['brandName'] ?? $settings['platformName'] ?? 'VoucherCenter'));
 $brandName = $tmpBrand;
+$tmpFav = trim((string) ($settings['favicon'] ?? ''));
+if ($tmpFav === '') $tmpFav = trim((string) ($contentCfg['favicon']['url'] ?? ''));
+$siteFavicon = $tmpFav !== '' ? $tmpFav : '/images/favicon.ico';
 
 $methodInfo = $methods[$method] ?? null;
 if (!$methodInfo || $amount <= 0) {
@@ -135,7 +138,7 @@ $headReplace = '<head>'
     . '<meta charset="UTF-8">'
     . '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">'
     . '<title>Payment - ' . htmlspecialchars($brandName) . '</title>'
-    . '<link rel="icon" href="/images/favicon.ico">'
+    . '<link rel="icon" href="' . htmlspecialchars($siteFavicon, ENT_QUOTES) . '">'
     . '<link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">'
     . $origStyles
     . '<style>'
