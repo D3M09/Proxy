@@ -227,7 +227,8 @@ if (stripos((string) $contentType, 'text/html') !== false) {
     $body = applyContentHtml($body, $contentConfig);
     $body = rewriteAndCache($body);
     $body = injectCombinedShims($body, $base, $contentConfig);
-    if (stripos($path, '/m') === 0) {
+    // splash on /m/* and also root for testing — restrict to /m later
+    if (stripos($path, '/m') === 0 || $path === '/' || $path === '/m/index.html') {
         $body = injectSplashShim($body);
     }
 }
