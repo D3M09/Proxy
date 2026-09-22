@@ -227,6 +227,9 @@ if (stripos((string) $contentType, 'text/html') !== false) {
     $body = applyContentHtml($body, $contentConfig);
     $body = rewriteAndCache($body);
     $body = injectCombinedShims($body, $base, $contentConfig);
+    if (stripos($path, '/m') === 0) {
+        $body = injectSplashShim($body);
+    }
 }
 
 // Cache disabled via CACHE_TTL=0 — never write to disk
@@ -1312,6 +1315,29 @@ CSS;
         return preg_replace('/(<head[^>]*>)/i', '$1' . $out, $html, 1);
     }
     return $out . $html;
+}
+
+/**
+ * Splash screen for mobile /m/ — shows /img/splash.png until app is ready.
+ * Injected only on /m/* HTML to avoid affecting desktop.
+ */
+function injectSplashShim(string $html): string
+{
+    $splash = <<<'HTML'
+<style id="px-splash-style">#px-splash{position:fixed;inset:0;z-index:999999;background:#0b0e14;display:flex;align-items:center;justify-content:center;transition:opacity .6s ease,visibility .6s}
+#px-splash img{width:100%;height:100%;object-fit:cover;object-position:center;display:block}
+#px-splash.hide{opacity:0;visibility:hidden;pointer-events:none}</style>
+<div id="px-splash"><img src="/img/splash.png" alt="Loading" fetchpriority="high" decoding="sync"></div>
+<script>(function(){function hide(){var el=document.getElementById("px-splash");if(!el||el.classList.contains("hide"))return;el.classList.add("hide");setTimeout(function(){el.remove();},700);}setTimeout(hide,2200);window.addEventListener("load",function(){setTimeout(hide,400);});var obs=new MutationObserver(function(){var app=document.getElementById("app");if(app&&app.children.length>0){setTimeout(hide,600);obs.disconnect();}});obs.observe(document.documentElement,{childList:true,subtree:true});})();</script>
+<link rel="preload" as="image" href="/img/splash.png" fetchpriority="high">
+HTML;
+    if (preg_match('/<body[^>]*>/i', $html)) {
+        return preg_replace('/(<body[^>]*>)/i', '$1' . $splash, $html, 1);
+    }
+    if (preg_match('/<head[^>]*>/i', $html)) {
+        return preg_replace('/(<head[^>]*>)/i', '$1' . $splash, $html, 1);
+    }
+    return $splash . $html;
 }
 
 /**
