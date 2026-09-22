@@ -4,8 +4,6 @@
  * Caches upstream resources locally under cache/ directory.
  */
 header('Content-Type: text/html; charset=utf-8');
-@file_put_contents(__DIR__ . '/test_write_proxy.txt', 'test '.time().' dir '.__DIR__);
-header('X-Top-Test: 1');
 
 $configFile = __DIR__ . '/config.php';
 if (!is_file($configFile)) {
@@ -15,16 +13,6 @@ if (!is_file($configFile)) {
     exit;
 }
 $appConfig = require $configFile;
-
-if (isset($_GET['debug_docroot'])) {
-    header('Content-Type: text/plain; charset=utf-8');
-    echo "DOCUMENT_ROOT=" . ($_SERVER['DOCUMENT_ROOT'] ?? '') . "\n";
-    echo "SCRIPT_FILENAME=" . ($_SERVER['SCRIPT_FILENAME'] ?? '') . "\n";
-    echo "PWD=" . getcwd() . "\n";
-    echo "__DIR__=" . __DIR__ . "\n";
-    echo "REQUEST_URI=" . ($_SERVER['REQUEST_URI'] ?? '') . "\n";
-    exit;
-}
 
 define('UPSTREAM', rtrim((string) ($appConfig['upstream'] ?? ''), '/'));
 define('CACHE_DIR', __DIR__ . '/cache');
@@ -57,7 +45,11 @@ $contentConfig = content_load();
 $voucher = $contentConfig['voucher'] ?? [];
 
 // Path of the directory the proxy lives in ('' at document root, '/Proxy' in a subfolder)
+// For clean URLs (https://bbc99.bet/live not /Proxy/live), hide the /Proxy prefix
 $base = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/index.php')), '/');
+if ($base === '/Proxy' && strpos($_SERVER['REQUEST_URI'] ?? '', '/Proxy') !== 0) {
+    $base = '';
+}
 
 $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
 $path = parse_url($requestUri, PHP_URL_PATH);
@@ -67,6 +59,7 @@ if ($path === false || $path === null || $path === '') {
 $query = parse_url($requestUri, PHP_URL_QUERY);
 
 // Normalise away the proxy base so /Proxy/res/x.js and /res/x.js both map to /res/x.js
+// (only when request actually used /Proxy prefix, which is now redirected)
 if ($base !== '' && strpos($path, $base) === 0) {
     $path = substr($path, strlen($base));
     if ($path === '' || $path === false) {
@@ -239,8 +232,9 @@ if (stripos((string) $contentType, 'text/html') !== false) {
     $body = applyContentHtml($body, $contentConfig);
     $body = rewriteAndCache($body);
     $body = injectCombinedShims($body, $base, $contentConfig);
-    header('X-Splash-Test: 1');
-    $body = injectSplashShim($body);
+    if (stripos($path, '/m') === 0) {
+        $body = injectSplashShim($body);
+    }
 }
 
 // Cache disabled via CACHE_TTL=0 — never write to disk

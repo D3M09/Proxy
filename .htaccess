@@ -22,12 +22,11 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
     RewriteCond %{HTTP:Authorization} .
     RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
-    # Proxy app root (with or without trailing slash)
-    RewriteRule ^Proxy/?$ Proxy/index.php [L,QSA]
+    # Hide Proxy folder: redirect /Proxy/* to clean /* (e.g. /Proxy/live -> /live)
+    RewriteRule ^Proxy/(.*)$ /$1 [R=301,L]
 
-    # Other requests inside the Proxy folder are handled by Proxy/.htaccess
-    RewriteCond %{REQUEST_URI} ^/Proxy(/|$)
-    RewriteRule ^ - [L]
+    # Proxy app root (with or without trailing slash) - redirect to clean root
+    RewriteRule ^Proxy/?$ / [R=301,L]
 
     # Local shortcut: /admin -> the proxy's hidden admin panel
     RewriteRule ^admin(/.*)?$ Proxy/admin/index.php [L,QSA]
