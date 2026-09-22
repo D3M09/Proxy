@@ -52,6 +52,17 @@ if ($base === '/Proxy' && strpos($_SERVER['REQUEST_URI'] ?? '', '/Proxy') !== 0)
 }
 
 $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
+// Hide Proxy folder: redirect /Proxy/* to clean /* at PHP level (if .htaccess cached)
+if (strpos($requestUri, '/Proxy/') === 0) {
+    $clean = substr($requestUri, 6); // strip /Proxy
+    if ($clean === '' || $clean[0] !== '/') $clean = '/' . $clean;
+    header('Location: ' . $clean, true, 301);
+    exit;
+}
+if ($requestUri === '/Proxy' || $requestUri === '/Proxy/') {
+    header('Location: /', true, 301);
+    exit;
+}
 $path = parse_url($requestUri, PHP_URL_PATH);
 if ($path === false || $path === null || $path === '') {
     $path = '/';
