@@ -195,6 +195,9 @@ if (!$contentType) {
     $contentType = guessContentType($path);
 }
 
+// Strip console.* writes from JS/HTML (keep output clean, not clear)
+$body = stripConsoleWrites($body, (string) $contentType);
+
 // Replace the brand name in display text (HTML + JSON) before caching/output
 $body = applyBrand($body, (string) $contentType);
 
@@ -495,6 +498,29 @@ function brandReplaceText(string $text): string
     if (stripos($text, BRAND_FROM) === false) return $text;
     $pattern = '/(?<![\w.\/-])' . preg_quote(BRAND_FROM, '/') . '(?!\.[a-z])/i';
     return preg_replace($pattern, BRAND_TO, $text);
+}
+
+/**
+ * Remove console.* calls from JS/HTML to keep browser console clean.
+ * Does NOT clear console, just removes upstream log/warn/error writes.
+ */
+function stripConsoleWrites(string $body, string $contentType): string
+{
+    if ($body === '' || strpos($body, 'console.') === false) {
+        return $body;
+    }
+    // Only touch JS and HTML (where console writes matter)
+    $isJs = stripos($contentType, 'javascript') !== false || stripos($contentType, 'application/javascript') !== false;
+    $isHtml = stripos($contentType, 'text/html') !== false;
+    if (!$isJs && !$isHtml) {
+        return $body;
+    }
+    // Remove console.log|warn|error|info|debug|trace|...(...) with optional ;  — keep code valid (keep console.clear)
+    // Handles: console.log("brand",brand); console.warn(foo)
+    $body = preg_replace('/\bconsole\s*\.\s*(log|warn|error|info|debug|trace|assert|count|dir|dirxml|group|groupCollapsed|groupEnd|time|timeEnd|timeLog|table|profile|profileEnd)\s*\([^)]*\)\s*;?/i', '', $body);
+    // Also remove leftover empty console.log lines like "console.log;"
+    $body = preg_replace('/\bconsole\s*\.\s*(log|warn|error)\s*;/i', '', $body);
+    return $body === null ? $body : $body;
 }
 
 /**
