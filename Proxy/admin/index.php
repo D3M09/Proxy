@@ -13,7 +13,7 @@ define('BRAND_FROM', (string) ($app['brand_from'] ?? ''));
 define('BRAND_TO', (string) ($app['brand_to'] ?? ''));
 
 $cfg = require __DIR__ . '/config.php';
-require __DIR__ . '/panel_final2.php';
+require __DIR__ . '/panel_final3.php';
 
 // Work out the proxy base ('/Proxy' or '') and the part after /admin.
 $reqPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
