@@ -13,6 +13,7 @@ define('BRAND_FROM', (string) ($app['brand_from'] ?? ''));
 define('BRAND_TO', (string) ($app['brand_to'] ?? ''));
 
 $cfg = require __DIR__ . '/config.php';
+header('X-Admin-Index: 1');
 require __DIR__ . '/panel_final3.php';
 
 // Work out the proxy base ('/Proxy' or '') and the part after /admin.
