@@ -36,6 +36,9 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
     RewriteRule ^m/$ /m/index.html [R=301,L]
     RewriteRule ^m/hoem/?$ /m/home [R=301,L]
 
+    # Logout should go to login, not homepage
+    RewriteRule ^admin/logout$ /admin/login [R=302,L]
+
     # Local shortcut: /admin -> the proxy's hidden admin panel
     RewriteRule ^admin(/.*)?$ Proxy/admin/index.php [L,QSA]
 
