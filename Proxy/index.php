@@ -80,6 +80,16 @@ if ($base !== '' && strpos($path, $base) === 0) {
 }
 $fullPath = $path . ($query ? '?' . $query : '');
 
+// Mobile typo redirects: /m and /m/hoem -> correct URLs
+if ($path === '/m' || $path === '/m/') {
+    header('Location: /m/index.html' . ($query ? '?' . $query : ''), true, 301);
+    exit;
+}
+if (preg_match('~^/m/hoem/?$~i', $path)) {
+    header('Location: /m/home' . ($query ? '?' . $query : ''), true, 301);
+    exit;
+}
+
 // Route /admin, /setup, and /voucherCenter locally (not proxied)
 if ($path === '/admin' || strpos($path, '/admin/') === 0) {
     require __DIR__ . '/admin/index.php';
