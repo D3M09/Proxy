@@ -1,1 +1,0 @@
-<?php header('X-Test-Admin: 1'); echo "TEST_ADMIN_".time(); ?>

@@ -148,10 +148,14 @@ $html = preg_replace('/<meta\s+http-equiv="Expires"[^>]*>/i', '', $html);
 $html = preg_replace('/\sdata-savepage-[a-z]+="[^"]*"/i', '', $html);
 
 $origStyles = '';
+$origLinks = '';
 if (preg_match('/<head>(.*)<\/head>/is', $html, $headMatch)) {
     $headContent = $headMatch[1];
     preg_match_all('/<style[^>]*>.*?<\/style>/is', $headContent, $styleMatches);
     $origStyles = implode("\n", $styleMatches[0]);
+    // Pay.html no longer inlines its CSS bundles; keep the external <link>s.
+    preg_match_all('/<link\b[^>]*\brel="stylesheet"[^>]*>/i', $headContent, $linkMatches);
+    $origLinks = implode("\n", $linkMatches[0]);
 }
 
 $headReplace = '<head>'
@@ -160,6 +164,7 @@ $headReplace = '<head>'
     . '<title>Payment - ' . htmlspecialchars($brandName) . '</title>'
     . '<link rel="icon" href="' . htmlspecialchars($siteFavicon, ENT_QUOTES) . '">'
     . '<link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">'
+    . $origLinks
     . $origStyles
     . '<style>'
     . '.blink-text{animation:blink 1s step-end infinite}'

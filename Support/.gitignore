@@ -1,0 +1,4 @@
+# Visitor conversations and admin credentials are runtime data, never commit them.
+/data/chats/
+/data/admin.json
+/data/throttle.json

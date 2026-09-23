@@ -29,7 +29,7 @@ $jenc = function ($v) use ($jflags) {
 
 $vcBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/voucherCenter/index.php')), '/');
 if ($vcBase === '' || $vcBase === '.') {
-    $vcBase = '/voucherCenter';
+    $vcBase = ''; // root install: keep the base empty so paths stay root-relative
 }
 
 $html = str_replace('/Vcentere/', $vcBase . '/', $html);
@@ -115,6 +115,19 @@ foreach ($methodsIn as $key => $m) {
     }
     $channelsByMethod[$key] = $clean;
 }
+
+// Hide payment methods that are disabled in the admin config, server-side, so the
+// full method list never flashes before the client script hides it after load.
+$html = preg_replace_callback(
+    '/<li(\s+class="change-item-animate\s+([A-Za-z0-9_]+)[^"]*")(\s*)>/',
+    function ($m) use ($methodCfg) {
+        $key = $m[2];
+        if (!isset($methodCfg[$key])) return $m[0];
+        if (($methodCfg[$key]['enabled'] ?? true)) return $m[0];
+        return '<li' . $m[1] . ' style="display:none"' . $m[3] . '>';
+    },
+    $html
+);
 
 $html = preg_replace_callback(
     '/var paymentImages = \{[\s\S]*?\};/',
