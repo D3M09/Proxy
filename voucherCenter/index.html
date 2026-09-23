@@ -295,10 +295,12 @@
             if (data && data.success && data.trackingNumber) {
               var goButton = document.getElementById('vcConfirmGo');
               if (goButton) {
-                goButton.onclick = function (event) {
-                  event.preventDefault();
-                  window.location.href = 'payment.php?tracking=' + encodeURIComponent(data.trackingNumber);
-                };
+                // a real href + target so the browser opens the tab itself
+                // (window.open after an async call can be popup-blocked)
+                goButton.href = 'deposit-info.html?tracking=' + encodeURIComponent(data.trackingNumber)
+                  + '&method=' + encodeURIComponent(method);
+                goButton.target = '_blank';
+                goButton.rel = 'noopener';
               }
               var popup = document.getElementById('vcConfirmPopup');
               if (popup) popup.classList.add('show');
