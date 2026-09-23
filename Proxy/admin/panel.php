@@ -135,7 +135,7 @@ function admin_nav(string $base, string $active): string
         'Overview'   => [['dashboard', 'Dashboard']],
         'Appearance' => [['titles', 'Titles'], ['logo', 'Logo'], ['favicon', 'Favicon'], ['appname', 'App name']],
         'Content'    => [['banners', 'Banners'], ['marquee', 'Marquee'], ['voucher', 'Voucher Center']],
-        'Payments'   => [['orders', 'Orders'], ['payment_methods', 'Pay Methods'], ['payment_settings', 'Pay Settings']],
+        'Payments'   => [['payment_methods', 'Pay Methods'], ['payment_settings', 'Pay Settings']],
         'Access'     => [['users', 'Users']],
         'System'     => [['settings', 'Settings'], ['tools', 'Tools']],
     ];
@@ -348,26 +348,12 @@ function admin_render_dashboard(string $base, string $notice = ''): void
     [$files, $bytes] = admin_dir_size(CACHE_DIR);
     $users = users_load();
     $content = content_load();
-    $allOrders = orders_read();
-    $pending = 0;
-    $confirmed = 0;
-    $totalAmount = 0;
-    foreach ($allOrders as $o) {
-        $s = $o['status'] ?? '';
-        if ($s === 'WaitingConfirm') $pending++;
-        elseif ($s === 'Confirmed') {
-            $confirmed++;
-            $totalAmount += (float) ($o['amount'] ?? 0);
-        }
-    }
     $stats = [
         'Upstream' => UPSTREAM !== '' ? UPSTREAM : '—',
         'Brand' => (BRAND_FROM !== '' ? BRAND_FROM . ' → ' : '') . BRAND_TO,
         'Cache' => number_format($files) . ' files · ' . number_format($bytes / 1048576, 2) . ' MB',
         'Admin users' => (string) count($users),
         'Banners' => (string) count($content['banners']),
-        'Orders' => number_format(count($allOrders)) . ' (' . $pending . ' pending)',
-        'Revenue' => number_format($totalAmount),
         'PHP' => PHP_VERSION,
     ];
     $cards = '';
@@ -378,7 +364,6 @@ function admin_render_dashboard(string $base, string $notice = ''): void
     $body = $ok . '<div class="grid">' . $cards . '</div>'
         . '<div class="card" style="margin-top:18px"><h3>Quick actions</h3><div class="desc">Common tasks</div>'
         . '<div class="row">'
-        . '<a class="btn ghost sm" href="' . htmlspecialchars(admin_home_url($base) . '/orders') . '">View orders</a>'
         . '<a class="btn ghost sm" href="' . htmlspecialchars(admin_home_url($base) . '/payment_methods') . '">Payment methods</a>'
         . '<a class="btn ghost sm" href="' . htmlspecialchars(admin_home_url($base) . '/banners') . '">Manage banners</a>'
         . '<a class="btn ghost sm" href="' . htmlspecialchars(admin_home_url($base) . '/voucher') . '">Voucher Center</a>'
@@ -741,119 +726,6 @@ function admin_render_tools(string $base, string $notice = ''): void
         . '<input type="hidden" name="csrf" value="' . $csrf . '"><input type="hidden" name="action" value="purge">'
         . '<button class="btn danger" type="submit">Purge cache</button></form></div>';
     admin_layout($base, 'tools', 'Tools', $body, $_SESSION['px_user'] ?? '');
-}
-
-/* -------------------- payments: orders -------------------- */
-
-function admin_render_orders(string $base, string $notice = ''): void
-{
-    $ok = admin_notice_html($notice);
-    $orders = array_reverse(orders_read());
-    $filter = trim((string) ($_GET['status'] ?? ''));
-    if ($filter !== '') {
-        $orders = array_filter($orders, function ($o) use ($filter) {
-            return ($o['status'] ?? '') === $filter;
-        });
-    }
-    $total = count($orders);
-    $pending = 0;
-    $confirmed = 0;
-    $expired = 0;
-    $allOrders = orders_read();
-    foreach ($allOrders as $o) {
-        $s = $o['status'] ?? '';
-        if ($s === 'WaitingConfirm') $pending++;
-        elseif ($s === 'Confirmed') $confirmed++;
-        elseif ($s === 'Expired') $expired++;
-    }
-    $home = admin_home_url($base);
-    $e = function ($s) { return htmlspecialchars((string) $s, ENT_QUOTES); };
-    $rows = '';
-    foreach ($orders as $o) {
-        $track = $o['trackingNumber'] ?? '';
-        $method = $o['paymentMethod'] ?? '';
-        $amount = $o['amount'] ?? 0;
-        $status = $o['status'] ?? '';
-        $created = $o['createdAt'] ?? '';
-        $trxId = $o['trxId'] ?? '';
-        $detailUrl = $home . '/order_detail?tracking=' . urlencode($track);
-        $rows .= '<tr>'
-            . '<td><a href="' . $e($detailUrl) . '" style="color:var(--acc);text-decoration:none">' . $e(substr($track, 0, 8)) . '...</a></td>'
-            . '<td><span class="badge">' . $e($method) . '</span></td>'
-            . '<td>' . number_format($amount) . '</td>'
-            . '<td>' . ($trxId !== '' ? $e($trxId) : '<span class="muted">—</span>') . '</td>'
-            . '<td>' . payment_status_badge($status) . '</td>'
-            . '<td class="muted">' . $e($created) . '</td>'
-            . '</tr>';
-    }
-    if ($rows === '') {
-        $rows = '<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">No orders found</td></tr>';
-    }
-    $fPending = $filter === 'WaitingConfirm' ? ' style="border-color:var(--warn);color:var(--warn)"' : '';
-    $fConfirmed = $filter === 'Confirmed' ? ' style="border-color:var(--acc2);color:var(--acc2)"' : '';
-    $fExpired = $filter === 'Expired' ? ' style="border-color:var(--danger);color:var(--danger)"' : '';
-    $fAll = $filter === '' ? ' style="border-color:var(--acc);color:var(--acc)"' : '';
-    $body = $ok
-        . '<div class="grid" style="margin-bottom:18px">'
-        . '<div class="stat"><div class="k">Total</div><div class="v">' . number_format($total) . '</div></div>'
-        . '<div class="stat"><div class="k">Pending</div><div class="v" style="color:var(--warn)">' . number_format($pending) . '</div></div>'
-        . '<div class="stat"><div class="k">Confirmed</div><div class="v" style="color:var(--acc2)">' . number_format($confirmed) . '</div></div>'
-        . '<div class="stat"><div class="k">Expired</div><div class="v" style="color:var(--danger)">' . number_format($expired) . '</div></div>'
-        . '</div>'
-        . '<div class="card"><h3>Orders</h3>'
-        . '<div class="row" style="margin-bottom:14px;gap:8px">'
-        . '<a class="btn ghost sm" href="' . $e($home . '/orders') . '"' . $fAll . '>All</a>'
-        . '<a class="btn ghost sm" href="' . $e($home . '/orders?status=WaitingConfirm') . '"' . $fPending . '>Pending</a>'
-        . '<a class="btn ghost sm" href="' . $e($home . '/orders?status=Confirmed') . '"' . $fConfirmed . '>Confirmed</a>'
-        . '<a class="btn ghost sm" href="' . $e($home . '/orders?status=Expired') . '"' . $fExpired . '>Expired</a>'
-        . '</div>'
-        . '<table><thead><tr><th>Tracking</th><th>Method</th><th>Amount</th><th>TRX ID</th><th>Status</th><th>Created</th></tr></thead><tbody>'
-        . $rows . '</tbody></table></div>';
-    admin_layout($base, 'orders', 'Orders', $body, $_SESSION['px_user'] ?? '');
-}
-
-function admin_render_order_detail(string $base, string $notice = ''): void
-{
-    $tracking = trim((string) ($_GET['tracking'] ?? ''));
-    $order = find_order_by_tracking($tracking);
-    if (!$order) {
-        admin_redirect_home($base);
-        return;
-    }
-    $ok = admin_notice_html($notice);
-    $home = admin_home_url($base);
-    $e = function ($s) { return htmlspecialchars((string) $s, ENT_QUOTES); };
-    $pmData = payment_methods_data_read();
-    $methods = $pmData['methods'] ?? [];
-    $methodKey = $order['paymentMethod'] ?? '';
-    $methodInfo = $methods[$methodKey] ?? [];
-    $accountNumber = $order['accountNumber'] ?? '';
-    if ($accountNumber === '') {
-        foreach (($methodInfo['accounts'] ?? []) as $acc) {
-            if ($acc['enabled'] ?? false) { $accountNumber = $acc['number'] ?? ''; break; }
-        }
-    }
-    $detail = '<div class="grid">'
-        . '<div class="stat"><div class="k">Tracking</div><div class="v" style="font-size:14px;word-break:break-all">' . $e($order['trackingNumber'] ?? '') . '</div></div>'
-        . '<div class="stat"><div class="k">Status</div><div class="v">' . payment_status_badge($order['status'] ?? '') . '</div></div>'
-        . '<div class="stat"><div class="k">Method</div><div class="v"><span class="badge">' . $e($methodKey) . '</span> ' . $e($methodInfo['name'] ?? $methodKey) . '</div></div>'
-        . '<div class="stat"><div class="k">Amount</div><div class="v">' . number_format($order['amount'] ?? 0) . '</div></div>'
-        . '<div class="stat"><div class="k">Channel</div><div class="v">' . $e($order['paymentChannel'] ?? '') . '</div></div>'
-        . '<div class="stat"><div class="k">Account</div><div class="v" style="font-size:13px">' . $e($accountNumber) . '</div></div>'
-        . '<div class="stat"><div class="k">TRX ID</div><div class="v" style="font-size:13px">' . ($order['trxId'] !== null ? $e($order['trxId']) : '<span class="muted">—</span>') . '</div></div>'
-        . '<div class="stat"><div class="k">Payer Account</div><div class="v" style="font-size:13px">' . ($order['payerAccount'] !== null ? $e($order['payerAccount']) : '<span class="muted">—</span>') . '</div></div>'
-        . '<div class="stat"><div class="k">Created</div><div class="v" style="font-size:13px">' . $e($order['createdAt'] ?? '') . '</div></div>'
-        . '<div class="stat"><div class="k">Expires</div><div class="v" style="font-size:13px">' . $e($order['expiresAt'] ?? '') . '</div></div>'
-        . '<div class="stat"><div class="k">Confirmed</div><div class="v" style="font-size:13px">' . ($order['confirmedAt'] !== null ? $e($order['confirmedAt']) : '<span class="muted">—</span>') . '</div></div>'
-        . '</div>';
-    $deleteForm = '<div class="card"><h3>Delete Order</h3>'
-        . '<form method="post" action="' . $e($home . '/order_detail?tracking=' . urlencode($tracking)) . '" onsubmit="return confirm(\'Delete this order permanently?\')">'
-        . '<input type="hidden" name="csrf" value="' . htmlspecialchars(admin_csrf(), ENT_QUOTES) . '">'
-        . '<input type="hidden" name="action" value="delete_order"><input type="hidden" name="tracking" value="' . $e($tracking) . '">'
-        . '<button class="btn danger" type="submit">Delete order</button></form></div>';
-    $body = $ok . '<div style="margin-bottom:14px"><a class="btn ghost sm" href="' . $e($home . '/orders') . '">&larr; Back to orders</a></div>'
-        . '<div class="card"><h3>Order Detail</h3>' . $detail . '</div>' . $deleteForm;
-    admin_layout($base, 'orders', 'Order Detail', $body, $_SESSION['px_user'] ?? '');
 }
 
 /* -------------------- payments: payment methods -------------------- */
@@ -1363,20 +1235,6 @@ function handleAdmin(string $base, string $sub, array $cfg): void
                 $notice = 'Payment settings saved.';
                 break;
 
-            case 'delete_order':
-                $track = trim((string) ($_POST['tracking'] ?? ''));
-                if ($track !== '') {
-                    $all = orders_read();
-                    $kept = [];
-                    foreach ($all as $o) {
-                        if (($o['trackingNumber'] ?? '') !== $track) {
-                            $kept[] = $o;
-                        }
-                    }
-                    orders_write($kept);
-                    $notice = 'Order deleted.';
-                }
-                break;
         }
     }
 
@@ -1414,12 +1272,6 @@ function handleAdmin(string $base, string $sub, array $cfg): void
             break;
         case 'tools':
             admin_render_tools($base, $notice);
-            break;
-        case 'orders':
-            admin_render_orders($base, $notice);
-            break;
-        case 'order_detail':
-            admin_render_order_detail($base, $notice);
             break;
         case 'payment_methods':
             admin_render_payment_methods($base, $notice);

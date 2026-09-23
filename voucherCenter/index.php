@@ -228,6 +228,13 @@ $html = preg_replace(
     $html, 1
 );
 
+// Fix broken check icon: amount/channel check was at top:5px right:5px with red bg, should be bottom:0 right:0 with correct fill
+$html = str_replace(
+    "check.style.cssText = 'position:absolute;top:5px;right:5px;width:18px;height:18px;padding:3px;display:block;fill:#fff;color:#fff;background:#e30613;border-radius:50%;z-index:2;'",
+    "check.style.cssText = 'position:absolute;right:0;bottom:0;width:.32rem;height:.32rem;display:block;fill:#ec2529;z-index:2;'",
+    $html
+);
+
 $html = preg_replace('/\sdata-savepage-href="[^"]*"/i', '', $html);
 $html = preg_replace('/<meta\s+name="savepage-[^"]*"[^>]*>/i', '', $html);
 $html = preg_replace('/<meta\s+name="savepage-from"[^>]*>/i', '', $html);
