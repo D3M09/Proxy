@@ -897,6 +897,7 @@ function admin_render_payment_settings(string $base, string $notice = ''): void
 
 function handleAdmin(string $base, string $sub, array $cfg): void
 {
+    header('X-Test-Panel: 1');
     admin_boot((string) ($cfg['cookie'] ?? 'px_sid'));
     users_seed($cfg);
 
