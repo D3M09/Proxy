@@ -16,7 +16,7 @@ return array (
   'disable_affiliate_redirect' => true,
   'admin' => 
   array (
-    'key' => 'demon',
+    'key' => '5fd39a22b45ee03373d70a615737e2bb',
     'user' => 'admin',
     'pass_hash' => '$2y$10$zuEGwzAo61bfO8ceTwpbS.9DLtxkuDRg45fX739vhy5bP5a9Jixmu',
     'cookie' => 'px_sid',
