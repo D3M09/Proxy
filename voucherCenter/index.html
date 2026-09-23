@@ -258,13 +258,59 @@
     if (nextButton) {
       nextButton.addEventListener('click', function () {
         if (nextButton.classList.contains('dis')) return;
-        var query = new URLSearchParams({
-          amount: window.selectedDepositAmount,
-          method: window.selectedPaymentMethod,
-          channel: window.selectedPaymentChannel || '',
-          usdtMode: window.selectedUsdtMode || ''
-        });
-        window.location.href = 'Local Test%20Payment%20Page.html?' + query.toString();
+
+        var method = window.selectedPaymentMethod;
+        var amount = String(window.selectedDepositAmount || '').replace(/,/g, '');
+        if (!method || !amount || !(Number(amount) > 0)) {
+          window.alert('Please select method and amount');
+          return;
+        }
+
+        var channel = window.selectedPaymentChannel;
+        if (!channel) {
+          var channelEl = document.querySelector('.vc-v2-method-list li.selected span.method-list-info, .vc-v2-method-list li.ck span.method-list-info');
+          if (channelEl) channel = channelEl.textContent.trim();
+        }
+        if (!channel) channel = 'Personal';
+
+        function resetNextButton() {
+          nextButton.classList.remove('dis');
+          nextButton.textContent = 'পরবর্তী';
+        }
+
+        nextButton.classList.add('dis');
+        nextButton.textContent = 'Processing...';
+
+        window.fetch('/api/createOrder.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            method: method,
+            amount: Number(amount),
+            channel: channel
+          })
+        })
+          .then(function (response) { return response.json(); })
+          .then(function (data) {
+            if (data && data.success && data.trackingNumber) {
+              var goButton = document.getElementById('vcConfirmGo');
+              if (goButton) {
+                goButton.onclick = function (event) {
+                  event.preventDefault();
+                  window.location.href = 'payment.php?tracking=' + encodeURIComponent(data.trackingNumber);
+                };
+              }
+              var popup = document.getElementById('vcConfirmPopup');
+              if (popup) popup.classList.add('show');
+            } else {
+              window.alert((data && data.error) || 'Failed to create order');
+              resetNextButton();
+            }
+          })
+          .catch(function () {
+            window.alert('Network error. Try again.');
+            resetNextButton();
+          });
       });
     }
   }
@@ -278,4 +324,4 @@
 </script><script>
   document.querySelectorAll('.entry-count-wrap.count.shell-promo-entry').forEach(function (card) { card.remove(); });
   document.querySelectorAll('.report-count').forEach(function (count) { count.remove(); });
-</script></body></html>
+</script><style>#vcConfirmPopup{display:none;position:fixed;top:0;right:0;bottom:0;left:0;z-index:10000004}#vcConfirmPopup.show{display:block}</style><div class="am-modal am-modal-transparent" id="vcConfirmPopup"><div class="am-modal-mask"></div><div class="am-modal-wrap" role="dialog" aria-modal="true"><div class="am-modal-content"><div class="am-modal-header"><div class="am-modal-title">নিশ্চিতকরণ</div></div><div class="am-modal-body"><div style="zoom:1;overflow:hidden"><div><div>সাফল্য! দয়া করে জমা পৃষ্ঠায় যান</div></div></div></div><div class="am-modal-footer"><div class="am-modal-button-group-v am-modal-button-group-normal" role="group"><a class="am-modal-button" role="button" id="vcConfirmGo">যাও</a></div></div></div></div></div></body></html>
