@@ -918,7 +918,8 @@ function handleAdmin(string $base, string $sub, array $cfg): void
             setcookie(session_name(), '', time() - 42000, $p['path'], $p['domain'], $p['secure'], $p['httponly']);
         }
         session_destroy();
-        admin_redirect_home($base);
+        header('Location: ' . $home . '/login', true, 302);
+        exit;
     }
 
     if ($sub === '/login') {

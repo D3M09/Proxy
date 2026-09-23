@@ -170,6 +170,8 @@ function admin_layout(string $base, string $active, string $title, string $conte
     $logoWidth = (int) ($cc['logo']['width'] ?? 0);
     $favTag = $fav !== '' ? '<link rel="icon" href="' . htmlspecialchars($fav, ENT_QUOTES) . '">' : '';
     $logoStyle = $logoWidth > 0 ? ' style="max-width:' . $logoWidth . 'px"' : '';
+    // Hide Orders tab (removed per request, keep hidden via CSS as fallback for cached old panel)
+    $favTag .= '<style>.nav-item[href$="/orders"],.nav-item[href*="/orders"],a[href*="order_detail"]{display:none!important}</style>';
     $logoHtml = $logoUrl !== ''
         ? '<img src="' . htmlspecialchars($logoUrl, ENT_QUOTES) . '" alt="' . $brand . ' logo"' . $logoStyle . '>'
         : '<span class="dot"></span>';
@@ -916,7 +918,8 @@ function handleAdmin(string $base, string $sub, array $cfg): void
             setcookie(session_name(), '', time() - 42000, $p['path'], $p['domain'], $p['secure'], $p['httponly']);
         }
         session_destroy();
-        admin_redirect_home($base);
+        header('Location: ' . $home . '/login', true, 302);
+        exit;
     }
 
     if ($sub === '/login') {
