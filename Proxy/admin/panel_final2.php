@@ -21,6 +21,7 @@ function admin_redirect_home(string $base): void
 
 function admin_boot(string $cookie): void
 {
+    header('X-Admin-Boot: 1');
     session_name($cookie !== '' ? $cookie : 'px_sid');
     $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
     session_set_cookie_params(['lifetime' => 0, 'path' => '/', 'httponly' => true, 'secure' => $secure, 'samesite' => 'Lax']);
@@ -897,6 +898,7 @@ function admin_render_payment_settings(string $base, string $notice = ''): void
 
 function handleAdmin(string $base, string $sub, array $cfg): void
 {
+    header('X-Test-Panel: 1');
     admin_boot((string) ($cfg['cookie'] ?? 'px_sid'));
     users_seed($cfg);
 
