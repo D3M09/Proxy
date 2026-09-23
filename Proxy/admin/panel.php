@@ -902,10 +902,6 @@ function handleAdmin(string $base, string $sub, array $cfg): void
     if (admin_key_match($cfg)) {
         $_SESSION['px_key'] = true;
     }
-    if (!admin_unlocked($cfg)) {
-        admin_redirect_home($base);
-    }
-
     $sub = '/' . trim($sub, '/');
     $home = admin_home_url($base);
     $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
@@ -948,6 +944,10 @@ function handleAdmin(string $base, string $sub, array $cfg): void
         }
         admin_render_login($base, '');
         exit;
+    }
+
+    if (!admin_unlocked($cfg)) {
+        admin_redirect_home($base);
     }
 
     if (!admin_authed()) {
