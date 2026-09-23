@@ -175,6 +175,7 @@ function admin_layout(string $base, string $active, string $title, string $conte
     $logoHtml = $logoUrl !== ''
         ? '<img src="' . htmlspecialchars($logoUrl, ENT_QUOTES) . '" alt="' . $brand . ' logo"' . $logoStyle . '>'
         : '<span class="dot"></span>';
+    header('X-Admin-Panel: new');
     echo <<<HTML
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="robots" content="noindex,nofollow,noarchive">
