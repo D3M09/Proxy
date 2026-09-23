@@ -274,7 +274,7 @@ tr:last-child td{border-bottom:0}
 <div class="main">
   <div class="top">
     <div style="display:flex;align-items:center;gap:12px"><button type="button" class="side-toggle side-toggle-top" id="px-top-toggle" aria-expanded="true" title="Toggle sidebar [ ]"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18"/><path d="M3 6h18"/><path d="M3 18h18"/></svg></button><div><div class="crumb">$brand / Admin</div><h1>$t</h1></div></div>
-    <div class="row"><span class="badge">$u</span><a class="btn ghost sm" href="$home/logout">Logout</a></div>
+    <div class="row"><span class="badge">$u</span><a class="btn ghost sm" href="$home/login" onclick="fetch('$home/logout',{method:'GET',credentials:'same-origin'}).finally(()=>location.href='$home/login');return false;">Logout</a></div>
   </div>
   <div class="content">$content</div>
 </div>
