@@ -28,9 +28,6 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
     # Proxy app root (with or without trailing slash) - redirect to clean root
     RewriteRule ^Proxy/?$ / [R=301,L]
 
-    # Test redirect for debugging
-    RewriteRule ^test_clean$ / [R=302,L]
-
     # Mobile typo redirects: /m and /m/hoem -> correct URLs
     RewriteRule ^m$ /m/index.html [R=301,L]
     RewriteRule ^m/$ /m/index.html [R=301,L]
@@ -39,11 +36,8 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
     # Logout should go to login, not homepage
     RewriteRule ^admin/logout$ /admin/login [R=302,L]
 
-    # Test admin file
-    RewriteRule ^admin/test$ Proxy/admin/test_admin.php [L,QSA]
-
-    # Local shortcut: /admin -> the proxy's hidden admin panel (use index_new to bypass cache)
-    RewriteRule ^admin(/.*)?$ Proxy/admin/index_new.php [L,QSA]
+    # Local shortcut: /admin -> the proxy's hidden admin panel
+    RewriteRule ^admin(/.*)?$ Proxy/admin/index.php [L,QSA]
 
     # Local shortcut: /setup -> the installer
     RewriteRule ^setup(/.*)?$ Proxy/setup.php [L,QSA]
@@ -61,8 +55,8 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
     RewriteCond %{REQUEST_FILENAME} -d
     RewriteRule ^ - [L]
 
-    # Everything else goes through the proxy (clean URLs, hide Proxy) - use index_final to bypass cache
-    RewriteRule ^ Proxy/index_final.php [L,QSA]
+    # Everything else goes through the proxy
+    RewriteRule ^ Proxy/index.php [L,QSA]
 </IfModule>
 
 <IfModule mod_expires.c>

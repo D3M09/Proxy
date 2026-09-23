@@ -4,7 +4,6 @@
  * Caches upstream resources locally under cache/ directory.
  */
 header('Content-Type: text/html; charset=utf-8');
-header('X-Proxy-Test: 1');
 
 $configFile = __DIR__ . '/config.php';
 if (!is_file($configFile)) {
@@ -254,10 +253,9 @@ if (stripos((string) $contentType, 'text/html') !== false) {
     $body = applyContentHtml($body, $contentConfig);
     $body = rewriteAndCache($body);
     $body = injectCombinedShims($body, $base, $contentConfig);
-    // splash disabled for now (was hanging on /m) — enable after cache purge
-    // if (stripos($path, '/m') === 0 && stripos($path, 'invite') === false) {
-    //     $body = injectSplashShim($body);
-    // }
+    if (stripos($path, '/m') === 0 && stripos($path, 'invite') === false) {
+        $body = injectSplashShim($body);
+    }
 }
 
 // Cache disabled via CACHE_TTL=0 — never write to disk
