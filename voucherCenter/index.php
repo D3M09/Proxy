@@ -235,7 +235,7 @@ $html = preg_replace_callback(
 $chScript = '<script>(function(){var CH=' . $jenc($channelsByMethod) . ';'
     . 'function keyOf(li){for(var k in CH){if(li&&li.classList&&li.classList.contains(k))return k;}return null;}'
     . 'function tpl(){return document.querySelector("svg.deposit-list-ck");}'
-    . 'function mark(li,on){var ex=li.querySelector("svg.deposit-list-ck");if(ex&&ex.parentNode)ex.parentNode.removeChild(ex);if(on){var t=tpl();if(t)li.insertBefore(t.cloneNode(true),li.firstChild);}}'
+    . 'function mark(li,on){var ex=li.querySelector("svg.deposit-list-ck");if(ex&&ex.parentNode)ex.parentNode.removeChild(ex);if(on){var t=tpl();if(t){var c=t.cloneNode(true);c.style.cssText="position:absolute;right:0;bottom:0;width:.32rem;height:.32rem;display:block;fill:#ec2529;z-index:2;";li.style.position="relative";li.insertBefore(c,li.firstChild);}}}'
     . 'function render(key){var list=CH[key];if(!list||!list.length)return;var ul=document.querySelector(".vc-v2-method-list ul");if(!ul)return;ul.innerHTML="";var first=null;'
     . 'list.forEach(function(ch){var li=document.createElement("li");var sp=document.createElement("span");sp.className="method-list-info";sp.textContent=ch.label||"";li.appendChild(sp);if(ch.enabled===false)li.style.display="none";ul.appendChild(li);'
     . 'if(ch.enabled!==false&&!first)first=li;'
