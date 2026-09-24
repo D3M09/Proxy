@@ -366,10 +366,23 @@ if (stripos($finalCT, 'charset') === false && stripos($finalCT, 'text/') === 0) 
     $finalCT .= '; charset=UTF-8';
 }
 $isAuth = isAuthTraffic((string) $path);
+$isJson = stripos((string) $contentType, 'json') !== false;
+$hasIdentity = trim((string) ($_SERVER['HTTP_COOKIE'] ?? '') . ($_SERVER['HTTP_AUTHORIZATION'] ?? '')
+    . ($_SERVER['HTTP_ENCRYPTION'] ?? '') . ($_SERVER['HTTP_X_GATEWAY_VERSION'] ?? '')) !== '';
 header('Content-Type: ' . $finalCT);
 if ($isAuth) {
     // Login/logout responses create or destroy the session: no browser,
     // proxy, or middlebox may reuse them for another visitor or visit.
+    header('Cache-Control: private, no-store, must-revalidate');
+    header('Vary: Cookie');
+} elseif ($status >= 400) {
+    // Error bodies (401 login-required, 400 maintenance) are per-visitor and
+    // momentary: caching them serves stale failures, e.g. a logged-out invite
+    // page keeps showing "not logged in" or another user's data for a day.
+    header('Cache-Control: private, no-store, must-revalidate');
+} elseif ($isJson && $hasIdentity) {
+    // Authenticated JSON (referral/income/profile data): private to this
+    // visitor, never reused across logins or stored by shared caches.
     header('Cache-Control: private, no-store, must-revalidate');
     header('Vary: Cookie');
 } elseif (stripos((string) $contentType, 'text/html') !== false) {
@@ -377,12 +390,13 @@ if ($isAuth) {
 }
 header('X-Proxy: true');
 header('Connection: close');
-if (!$isAuth && stripos((string) $contentType, 'text/html') === false) {
+if (!$isAuth && $status < 400 && !($isJson && $hasIdentity) && stripos((string) $contentType, 'text/html') === false) {
     // Allow browser caching for static assets (reduces repeat TTFB).
-    // Auth traffic keeps the no-store sent above and never lands here.
+    // Auth traffic, errors, and authenticated JSON keep the no-store sent
+    // above and never land here.
     header('Cache-Control: public, max-age=86400, immutable');
     header('X-Content-Type-Options: nosniff');
-} elseif (!$isAuth) {
+} elseif (!$isAuth && stripos((string) $contentType, 'text/html') !== false) {
     header('Link: <' . activeUpstream() . '/res/css/vendor.163077c576135e6b923a.css>; rel=preload; as=style', false);
 }
 header('Content-Length: ' . strlen($body));
