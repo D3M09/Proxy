@@ -742,124 +742,163 @@ function admin_render_payment_methods(string $base, string $notice = ''): void
     $action = htmlspecialchars(admin_home_url($base) . '/payment_methods');
     $csrf = htmlspecialchars(admin_csrf(), ENT_QUOTES);
     $e = function ($s) { return htmlspecialchars((string) $s, ENT_QUOTES); };
-    $tiny = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+
+    $chRow = function (string $keyE, int $ai, int $ci, string $name, bool $on, int $min, int $max) use ($e): string {
+        $p = 'm[' . $keyE . '][accounts][' . $ai . '][channels][' . $ci . ']';
+        return '<tr>'
+            . '<td><input name="' . $p . '[name]" value="' . $e($name) . '" placeholder="Channel name"></td>'
+            . '<td class="pm-c"><label class="pm-switch"><input type="checkbox" name="' . $p . '[enabled]" value="1" ' . ($on ? 'checked' : '') . '><span class="sl"></span></label></td>'
+            . '<td><input type="number" name="' . $p . '[min]" value="' . $min . '"></td>'
+            . '<td><input type="number" name="' . $p . '[max]" value="' . $max . '"></td>'
+            . '<td class="pm-c"><button type="button" class="pm-icon pm-ch-del" title="Remove channel">&times;</button></td>'
+            . '</tr>';
+    };
 
     $panels = '';
     foreach ($methods as $key => $m) {
-        $name = $m['name'] ?? $key;
+        $keyE = $e($key);
+        $name = (string) ($m['name'] ?? $key);
         $enabled = !empty($m['enabled']);
-        $color = $m['color'] ?? '';
-        $accounts = $m['accounts'] ?? [];
+        $color = (string) ($m['color'] ?? '');
+        $logo = (string) ($m['logo'] ?? '');
+        $dot = $e($color !== '' ? $color : '#3b82f6');
+        $accounts = is_array($m['accounts'] ?? null) ? $m['accounts'] : [];
 
-        $accRows = '';
+        $accs = '';
         $ai = 0;
         foreach ($accounts as $acc) {
-            $accNum = $acc['number'] ?? '';
-            $accName = $acc['name'] ?? '';
+            $accNum = (string) ($acc['number'] ?? '');
+            $accName = (string) ($acc['name'] ?? '');
             $accEnabled = !empty($acc['enabled']);
-            $channels = $acc['channels'] ?? [];
+            $channels = is_array($acc['channels'] ?? null) ? $acc['channels'] : [];
 
             $chRows = '';
             $ci = 0;
             foreach ($channels as $ch) {
-                $chName = $ch['name'] ?? '';
-                $chEnabled = !empty($ch['enabled']);
-                $chMin = $ch['min'] ?? 100;
-                $chMax = $ch['max'] ?? 30000;
-                $chRows .= '<tr>'
-                    . '<td><input name="m[' . $key . '][accounts][' . $ai . '][channels][' . $ci . '][name]" value="' . $e($chName) . '"></td>'
-                    . '<td style="text-align:center"><label class="vc-switch"><input type="checkbox" name="m[' . $key . '][accounts][' . $ai . '][channels][' . $ci . '][enabled]" value="1" ' . ($chEnabled ? 'checked' : '') . '><span class="sl"></span></label></td>'
-                    . '<td><input type="number" name="m[' . $key . '][accounts][' . $ai . '][channels][' . $ci . '][min]" value="' . (int) $chMin . '" style="width:80px"></td>'
-                    . '<td><input type="number" name="m[' . $key . '][accounts][' . $ai . '][channels][' . $ci . '][max]" value="' . (int) $chMax . '" style="width:80px"></td>'
-                    . '<td style="text-align:center"><input type="checkbox" name="m[' . $key . '][accounts][' . $ai . '][channels][' . $ci . '][remove]" value="1" style="width:auto" title="Remove"></td>'
-                    . '</tr>';
+                $chRows .= $chRow($keyE, $ai, $ci, (string) ($ch['name'] ?? ''), !empty($ch['enabled']), (int) ($ch['min'] ?? 100), (int) ($ch['max'] ?? 30000));
                 $ci++;
             }
-            $nCh = count($channels);
-            $chRows .= '<tr>'
-                . '<td><input name="m[' . $key . '][accounts][' . $ai . '][channels][' . $nCh . '][name]" placeholder="Add channel..."></td>'
-                . '<td style="text-align:center"><label class="vc-switch"><input type="checkbox" name="m[' . $key . '][accounts][' . $ai . '][channels][' . $nCh . '][enabled]" value="1" checked><span class="sl"></span></label></td>'
-                . '<td><input type="number" name="m[' . $key . '][accounts][' . $ai . '][channels][' . $nCh . '][min]" value="100" style="width:80px"></td>'
-                . '<td><input type="number" name="m[' . $key . '][accounts][' . $ai . '][channels][' . $nCh . '][max]" value="30000" style="width:80px"></td>'
-                . '<td class="muted" style="text-align:center">new</td>'
-                . '</tr>';
 
-            $accRows .= '<details class="vc-ch" open><summary>'
-                . '<span>' . $e($accNum) . ' — ' . $e($accName) . '</span>'
-                . '<span class="muted">' . count($channels) . ' channels <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>'
-                . '</summary><div class="body">'
-                . '<div class="vc-fields">'
-                . '<div class="vc-field"><label>Account Number</label><input name="m[' . $key . '][accounts][' . $ai . '][number]" value="' . $e($accNum) . '" placeholder="01XXXXXXXXX"></div>'
-                . '<div class="vc-field"><label>Account Name</label><input name="m[' . $key . '][accounts][' . $ai . '][name]" value="' . $e($accName) . '" placeholder="Account holder name"></div>'
+            $accs .= '<div class="pm-acc" data-ai="' . $ai . '" data-ci="' . $ci . '">'
+                . '<div class="pm-acc-head">'
+                . '<span class="pm-dot" style="background:' . $dot . '"></span>'
+                . '<input class="pm-acc-num" name="m[' . $keyE . '][accounts][' . $ai . '][number]" value="' . $e($accNum) . '" placeholder="Account number">'
+                . '<input class="pm-acc-name" name="m[' . $keyE . '][accounts][' . $ai . '][name]" value="' . $e($accName) . '" placeholder="Account name">'
+                . '<label class="pm-switch"><input type="checkbox" name="m[' . $keyE . '][accounts][' . $ai . '][enabled]" value="1" ' . ($accEnabled ? 'checked' : '') . '><span class="sl"></span></label>'
+                . '<button type="button" class="pm-icon pm-acc-del" title="Remove account">&times;</button>'
                 . '</div>'
-                . '<div class="row" style="gap:12px;margin:10px 0 12px">'
-                . '<label class="vc-switch"><input type="checkbox" name="m[' . $key . '][accounts][' . $ai . '][enabled]" value="1" ' . ($accEnabled ? 'checked' : '') . '><span class="sl"></span><span class="txt" data-on="Enabled" data-off="Disabled">' . ($accEnabled ? 'Enabled' : 'Disabled') . '</span></label>'
-                . '<label style="margin-left:auto;font-size:12.5px;color:var(--muted)"><input type="checkbox" name="m[' . $key . '][accounts][' . $ai . '][remove]" value="1" style="width:auto"> Remove account</label>'
-                . '</div>'
-                . '<table><thead><tr><th>Channel Name</th><th style="width:80px;text-align:center">On</th><th style="width:80px">Min</th><th style="width:80px">Max</th><th style="width:70px;text-align:center">Del</th></tr></thead><tbody>'
-                . $chRows . '</tbody></table></div></details>';
+                . '<table class="pm-table"><thead><tr><th>Channel</th><th class="pm-c">On</th><th class="pm-th-num">Min</th><th class="pm-th-num">Max</th><th></th></tr></thead>'
+                . '<tbody>' . $chRows . '</tbody></table>'
+                . '<button type="button" class="pm-add pm-add-ch">+ Add channel</button>'
+                . '</div>';
             $ai++;
         }
 
-        $nAcc = count($accounts);
-        $accRows .= '<div style="margin-top:10px"><details class="vc-ch"><summary><span class="muted">+ Add account</span></summary><div class="body">'
-            . '<div class="vc-fields">'
-            . '<div class="vc-field"><label>Account Number</label><input name="m[' . $key . '][accounts][' . $nAcc . '][number]" placeholder="01XXXXXXXXX"></div>'
-            . '<div class="vc-field"><label>Account Name</label><input name="m[' . $key . '][accounts][' . $nAcc . '][name]" placeholder="Account holder name"></div>'
+        $panels .= '<section class="card pm-card">'
+            . '<div class="pm-head">'
+            . '<div class="pm-title"><span class="pm-dot" style="background:' . $dot . '"></span><strong>' . $e($name) . '</strong><span class="badge">' . $keyE . '</span></div>'
+            . '<label class="pm-switch"><input type="checkbox" name="m[' . $keyE . '][enabled]" value="1" ' . ($enabled ? 'checked' : '') . '><span class="sl"></span><span class="txt" data-on="On" data-off="Off">' . ($enabled ? 'On' : 'Off') . '</span></label>'
             . '</div>'
-            . '<label class="vc-switch" style="margin-top:10px"><input type="checkbox" name="m[' . $key . '][accounts][' . $nAcc . '][enabled]" value="1" checked><span class="sl"></span><span>Enabled</span></label>'
-            . '</div></details></div>';
-
-        $panels .= '<div class="card vc-sec">'
-            . '<div class="vc-sec-head"><h3><span class="badge">' . $e($key) . '</span> &nbsp;' . $e($name) . '</h3>'
-            . '<label class="vc-switch"><input type="checkbox" name="m[' . $key . '][enabled]" value="1" ' . ($enabled ? 'checked' : '') . '><span class="sl"></span><span class="txt" data-on="On" data-off="Off">' . ($enabled ? 'On' : 'Off') . '</span></label></div>'
-            . '<div class="vc-fields" style="margin-bottom:14px">'
-            . '<div class="vc-field"><label>Display Name</label><input name="m[' . $key . '][name]" value="' . $e($name) . '"></div>'
-            . '<div class="vc-field"><label>Color</label><input name="m[' . $key . '][color]" value="' . $e($color) . '" placeholder="#E2136E" style="width:120px"></div>'
+            . '<div class="pm-grid">'
+            . '<label class="pm-label">Display name<input name="m[' . $keyE . '][name]" value="' . $e($name) . '"></label>'
+            . '<label class="pm-label">Color<input name="m[' . $keyE . '][color]" value="' . $e($color) . '" placeholder="#E2136E"></label>'
+            . '<label class="pm-label">Logo URL<input name="m[' . $keyE . '][logo]" value="' . $e($logo) . '" placeholder="https://..."></label>'
             . '</div>'
-            . '<h4 style="margin:0 0 10px;font-size:13px;color:var(--muted)">Accounts &amp; Channels</h4>'
-            . $accRows
-            . '</div>';
+            . '<div class="pm-sub">Accounts <span class="muted">(' . count($accounts) . ')</span></div>'
+            . '<div class="pm-accounts" data-key="' . $keyE . '" data-seq="' . $ai . '">' . $accs . '</div>'
+            . '<button type="button" class="pm-add pm-add-acc">+ Add account</button>'
+            . '</section>';
     }
 
+    if ($methods === []) {
+        $panels = '<div class="card"><h3>No payment methods</h3><div class="desc">No methods are configured yet.</div></div>';
+    }
+
+    $tpl = '<template id="tpl-ch">'
+        . '<tr>'
+        . '<td><input name="m[__K__][accounts][__AI__][channels][__CI__][name]" placeholder="Channel name"></td>'
+        . '<td class="pm-c"><label class="pm-switch"><input type="checkbox" name="m[__K__][accounts][__AI__][channels][__CI__][enabled]" value="1" checked><span class="sl"></span></label></td>'
+        . '<td><input type="number" name="m[__K__][accounts][__AI__][channels][__CI__][min]" value="100"></td>'
+        . '<td><input type="number" name="m[__K__][accounts][__AI__][channels][__CI__][max]" value="30000"></td>'
+        . '<td class="pm-c"><button type="button" class="pm-icon pm-ch-del" title="Remove channel">&times;</button></td>'
+        . '</tr></template>'
+        . '<template id="tpl-acc">'
+        . '<div class="pm-acc">'
+        . '<div class="pm-acc-head">'
+        . '<span class="pm-dot"></span>'
+        . '<input class="pm-acc-num" name="m[__K__][accounts][__AI__][number]" placeholder="Account number">'
+        . '<input class="pm-acc-name" name="m[__K__][accounts][__AI__][name]" placeholder="Account name">'
+        . '<label class="pm-switch"><input type="checkbox" name="m[__K__][accounts][__AI__][enabled]" value="1" checked><span class="sl"></span></label>'
+        . '<button type="button" class="pm-icon pm-acc-del" title="Remove account">&times;</button>'
+        . '</div>'
+        . '<table class="pm-table"><thead><tr><th>Channel</th><th class="pm-c">On</th><th class="pm-th-num">Min</th><th class="pm-th-num">Max</th><th></th></tr></thead><tbody></tbody></table>'
+        . '<button type="button" class="pm-add pm-add-ch">+ Add channel</button>'
+        . '</div></template>';
+
     $style = '<style>'
-        . '.vc-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}'
-        . '.vc-field label{display:block;font-size:11px;color:var(--muted);margin:0 0 5px;text-transform:uppercase;letter-spacing:.05em}'
-        . '.vc-field input{width:100%}'
-        . '.vc-sec{margin-bottom:18px}'
-        . '.vc-sec-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}'
-        . '.vc-sec-head h3{margin:0;display:flex;align-items:center;font-size:15px}'
-        . '.vc-ch{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:var(--panel2);overflow:hidden}'
-        . '.vc-ch>summary{list-style:none;cursor:pointer;padding:11px 13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:10px}'
-        . '.vc-ch>summary::-webkit-details-marker{display:none}'
-        . '.vc-ch[open]>summary{border-bottom:1px solid var(--line)}'
-        . '.vc-ch .body{padding:12px 13px}'
-        . '.vc-ch .body table{margin:0}'
-        . '.vc-ch .chev{transition:transform .15s;vertical-align:middle;margin-left:6px}'
-        . '.vc-ch[open] .chev{transform:rotate(180deg)}'
-        . '.vc-switch{position:relative;display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px;color:var(--muted);user-select:none}'
-        . '.vc-switch input{position:absolute;opacity:0;width:0;height:0}'
-        . '.vc-switch .sl{width:40px;height:22px;border-radius:999px;background:#2a3444;position:relative;transition:.15s;flex:0 0 40px}'
-        . '.vc-switch .sl:before{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#9aa6b6;transition:.15s}'
-        . '.vc-switch input:checked+.sl{background:#22c55e}'
-        . '.vc-switch input:checked+.sl:before{transform:translateX(18px);background:#fff}'
-        . '.vc-savebar{position:sticky;bottom:14px;display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:12px 14px;background:rgba(18,23,34,.94);border:1px solid var(--line);border-radius:12px;backdrop-filter:blur(6px)}'
+        . '.pm-card{margin-bottom:18px}'
+        . '.pm-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:14px}'
+        . '.pm-title{display:flex;align-items:center;gap:10px;font-size:15px}'
+        . '.pm-dot{width:12px;height:12px;border-radius:50%;background:#3b82f6;flex:0 0 12px}'
+        . '.pm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}'
+        . '.pm-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0}'
+        . '.pm-label input{margin-top:5px}'
+        . '.pm-sub{margin:16px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}'
+        . '.pm-accounts{display:flex;flex-direction:column;gap:10px}'
+        . '.pm-acc{border:1px solid var(--line);border-radius:10px;background:var(--panel2);padding:12px}'
+        . '.pm-acc-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}'
+        . '.pm-acc-head .pm-acc-num{flex:1;min-width:150px}'
+        . '.pm-acc-head .pm-acc-name{flex:1;min-width:150px}'
+        . '.pm-th-num{width:90px}'
+        . '.pm-table{margin:0}.pm-table td,.pm-table th{padding:6px}.pm-table input{margin:0}'
+        . '.pm-c{text-align:center}'
+        . '.pm-add{margin-top:10px;background:#171e2a;border:1px dashed #33415a;color:var(--muted);border-radius:9px;padding:8px 12px;cursor:pointer;font:inherit;font-size:12.5px}'
+        . '.pm-add:hover{color:#fff;border-color:var(--acc)}'
+        . '.pm-icon{background:transparent;border:0;color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:4px 8px;border-radius:7px}'
+        . '.pm-icon:hover{color:#fff;background:#2a1a1e}'
+        . '.pm-switch{position:relative;display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px;color:var(--muted);user-select:none;margin:0}'
+        . '.pm-switch input{position:absolute;opacity:0;width:0;height:0}'
+        . '.pm-switch .sl{width:40px;height:22px;border-radius:999px;background:#2a3444;position:relative;transition:.15s;flex:0 0 40px}'
+        . '.pm-switch .sl:before{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#9aa6b6;transition:.15s}'
+        . '.pm-switch input:checked+.sl{background:#22c55e}'
+        . '.pm-switch input:checked+.sl:before{transform:translateX(18px);background:#fff}'
+        . '.pm-savebar{position:sticky;bottom:14px;display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:12px 14px;background:rgba(18,23,34,.94);border:1px solid var(--line);border-radius:12px;backdrop-filter:blur(6px)}'
         . '</style>';
 
-    $preview = '<script>(function(){'
-        . 'document.querySelectorAll(".vc-switch input").forEach(function(cb){'
-        . 'cb.addEventListener("change",function(){var t=cb.parentElement.querySelector(".txt");'
-        . 'if(t)t.textContent=cb.checked?(t.getAttribute("data-on")||"On"):(t.getAttribute("data-off")||"Off");});});'
+    $script = '<script>(function(){'
+        . 'var tplCh=document.getElementById("tpl-ch"),tplAcc=document.getElementById("tpl-acc");'
+        . 'function cloneTpl(t){return t.content.firstElementChild.cloneNode(true);}'
+        . 'function fill(el,m){var h=el.innerHTML,rep={__K__:m.k,__AI__:m.ai,__CI__:m.ci};for(var k in rep){h=h.split(k).join(rep[k]);}el.innerHTML=h;}'
+        . 'function addChannel(acc){'
+        . 'var wrap=acc.closest(".pm-accounts"),key=wrap.getAttribute("data-key"),ai=acc.getAttribute("data-ai");'
+        . 'var ci=parseInt(acc.getAttribute("data-ci")||"0",10);acc.setAttribute("data-ci",ci+1);'
+        . 'var tr=cloneTpl(tplCh);fill(tr,{k:key,ai:ai,ci:ci});acc.querySelector("tbody").appendChild(tr);}'
+        . 'function addAccount(wrap){'
+        . 'var key=wrap.getAttribute("data-key"),ai=parseInt(wrap.getAttribute("data-seq")||"0",10);wrap.setAttribute("data-seq",ai+1);'
+        . 'var acc=cloneTpl(tplAcc);acc.setAttribute("data-ai",ai);acc.setAttribute("data-ci","0");fill(acc,{k:key,ai:ai,ci:""});'
+        . 'var tr=cloneTpl(tplCh);fill(tr,{k:key,ai:ai,ci:"0"});acc.querySelector("tbody").appendChild(tr);wrap.appendChild(acc);'
+        . 'acc.querySelector(".pm-acc-num").focus();}'
+        . 'document.addEventListener("click",function(ev){'
+        . 'var el=ev.target;'
+        . 'if(el.closest(".pm-add-ch")){addChannel(el.closest(".pm-acc"));return;}'
+        . 'if(el.closest(".pm-add-acc")){addAccount(el.closest(".pm-card").querySelector(".pm-accounts"));return;}'
+        . 'if(el.closest(".pm-ch-del")){var tr=el.closest("tr");if(tr)tr.remove();return;}'
+        . 'if(el.closest(".pm-acc-del")){var a=el.closest(".pm-acc");if(a)a.remove();return;}'
+        . '});'
+        . 'document.addEventListener("change",function(ev){'
+        . 'var cb=ev.target;if(!cb||cb.type!=="checkbox")return;var t=cb.parentElement.querySelector(".txt");'
+        . 'if(t)t.textContent=cb.checked?(t.getAttribute("data-on")||"On"):(t.getAttribute("data-off")||"Off");});'
         . '})();</script>';
 
     $body = $ok . $style
-        . '<div class="card"><h3>Payment Methods</h3><div class="desc">Manage payment accounts, channels, and min/max amounts per channel. Changes here affect the order creation API and payment page.</div></div>'
+        . '<div class="card"><h3>Payment Methods</h3><div class="desc">Enable methods and manage their accounts, channels and min/max limits. Add or remove rows right here &mdash; the page only reloads when you save.</div></div>'
         . '<form method="post" action="' . $action . '">'
         . '<input type="hidden" name="csrf" value="' . $csrf . '"><input type="hidden" name="action" value="save_payment_methods">'
         . $panels
-        . '<div class="vc-savebar"><span class="muted" style="margin-right:auto">Changes apply immediately to the payment system.</span>'
-        . '<button class="btn" type="submit">Save payment methods</button></div>'
-        . '</form>' . $preview;
+        . $tpl
+        . '<div class="pm-savebar"><span class="muted" style="margin-right:auto">Changes apply as soon as you save.</span>'
+        . '<button class="btn" type="submit" style="margin:0">Save payment methods</button></div>'
+        . '</form>' . $script;
     admin_layout($base, 'payment_methods', 'Payment Methods', $body, $_SESSION['px_user'] ?? '');
 }
 

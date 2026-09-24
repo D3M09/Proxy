@@ -37,17 +37,26 @@ if (!$order) {
     exit;
 }
 
-if ($order['status'] !== 'WaitingConfirm') {
+if ($order['status'] !== 'WaitingConfirm' && $order['status'] !== 'Confirmed') {
     echo json_encode(['error' => 'Order is not pending', 'status' => $order['status']]);
     exit;
 }
 
-$updates = [
-    'status' => 'Confirmed',
-    'confirmedAt' => date('c'),
-];
+$isResubmit = ($order['status'] === 'Confirmed');
+
+$updates = [];
+if (!$isResubmit) {
+    $updates['status'] = 'Confirmed';
+    $updates['confirmedAt'] = date('c');
+}
 if ($payerAccount !== '') $updates['payerAccount'] = $payerAccount;
 if ($trxId !== '') $updates['trxId'] = $trxId;
+
+if (!$updates) {
+    http_response_code(400);
+    echo json_encode(['error' => 'trxId is required']);
+    exit;
+}
 
 update_order($tracking, $updates);
 
