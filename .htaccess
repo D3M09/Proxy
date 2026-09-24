@@ -42,12 +42,26 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
     # Local shortcut: /setup -> the installer
     RewriteRule ^setup(/.*)?$ Proxy/setup.php [L,QSA]
 
-    # Offload static /res to upstream CDN (faster than PHP proxy when cache disabled)
-    RewriteCond %{REQUEST_URI} ^/res/
-    RewriteRule ^res/(.*)$ https://www.1333bk.com/res/$1 [R=302,L]
+    # Offload static /res to upstream CDN ONLY when PHP disk cache is disabled (CACHE_TTL=0).
+    # For reverse-proxy mode (CACHE_TTL>0, default 3600) this is DISABLED so /res is proxied via
+    # Proxy/index.php and served from local disk cache (X-Proxy-Cache: HIT) on second hit.
+    # To re-enable offload, uncomment the two lines below.
+    # RewriteCond %{REQUEST_URI} ^/res/
+    # RewriteRule ^res/(.*)$ https://www.1333bk.com/res/$1 [R=302,L]
 
     # Payment API endpoints
     RewriteRule ^api/(.*)$ Proxy/api/$1 [L,QSA]
+
+    # --- Canonical voucher-center URL -------------------------------------
+    # The page is reachable as /VoucherCenter/ (the proxy matches the name
+    # case-insensitively), /voucherCenter/index.html and
+    # /voucherCenter/index.php. Each variant is its own cache key for one and
+    # the same page, so browsers/CDNs store the same bytes several times.
+    # Collapse them onto a single URL. Must stay above the real-file rule
+    # below, which would otherwise serve index.html as-is.
+    RewriteCond %{REQUEST_URI} !^/voucherCenter/
+    RewriteRule ^VoucherCenter/?(.*)$ /voucherCenter/$1 [R=301,L,NC]
+    RewriteRule ^voucherCenter/index\.(html|php)$ /voucherCenter/ [R=301,L,NC]
 
     # Real files/directories (except the document root) are served as-is
     RewriteCond %{REQUEST_URI} !=/
