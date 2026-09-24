@@ -1,3 +1,10 @@
 node_modules/
 .tmp-cdp/
 *.zip
+
+# deployment scratch: holds the SSH private key used to deploy to the live host
+_deploy/
+_verify/
+_rebuild/
+_audit.html
+_perffix.js

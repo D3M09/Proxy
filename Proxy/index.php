@@ -17,6 +17,32 @@ $appConfig = require $configFile;
 define('UPSTREAM', rtrim((string) ($appConfig['upstream'] ?? ''), '/'));
 define('CACHE_DIR', __DIR__ . '/cache');
 define('CACHE_TTL', max(0, (int) ($appConfig['cache_ttl'] ?? 3600))); // seconds
+
+// How long a mirror that just failed is skipped before it is tried again. Short
+// enough that a recovered mirror returns on its own, long enough that a dead
+// primary costs ONE request a timeout instead of every single request paying it.
+define('UPSTREAM_FAIL_TTL', 120);
+
+// Total seconds a request may spend walking from one mirror to the next after
+// the first one fails. Each attempt is already bounded by its own curl timeout,
+// so this only stops a long list of dead mirrors from holding a PHP worker for
+// the whole maximum_execution_time.
+define('UPSTREAM_FAILOVER_BUDGET', 10);
+
+// Congestion control for small process pools (shared hosting). A fetch slower
+// than this, or one that fails, marks the upstream as degraded for a short
+// window; during that window expired cache entries are served straight from
+// disk instead of each visitor holding a process slot waiting on the upstream.
+// Only a config change needs a new value here, not a code edit.
+define('UPSTREAM_SLOW_MS', 2000);
+define('UPSTREAM_DEGRADED_TTL', 30);
+// One request in this many still revalidates while degraded, so a cached entry
+// keeps moving forward and the site recovers by itself.
+define('DEGRADED_REVALIDATE_1_IN', 20);
+// How long a request waits for another request that is already filling the same
+// cache entry, before giving up and fetching it itself.
+define('CACHE_FILL_WAIT_MS', 2500);
+
 define('USER_AGENT', (string) ($appConfig['user_agent'] ?? 'Mozilla/5.0'));
 
 // Brand name replacement (applied to display text only)
@@ -78,6 +104,21 @@ if ($base !== '' && strpos($path, $base) === 0) {
     }
 }
 $fullPath = $path . ($query ? '?' . $query : '');
+
+// The disk cache maps the request path straight onto a filename
+// (CACHE_DIR . '/' . $path), so a ".." segment would resolve outside
+// Proxy/cache - /res/../../config.php becomes Proxy/config.php - and could then
+// be read back out or overwritten, and ".json" is one of the cacheable types.
+// Web servers normalise dot-segments before PHP sees REQUEST_URI, so this is not
+// reachable today; it is refused here so that nothing has to depend on that.
+if (strpos($path, '..') !== false || strpos($path, '\\') !== false) {
+    http_response_code(400);
+    header('Content-Type: text/plain; charset=UTF-8');
+    header('Cache-Control: no-store');
+    header('X-Proxy: true');
+    echo 'Bad Request';
+    exit;
+}
 
 // Mobile typo redirects: /m and /m/hoem -> correct URLs
 if ($path === '/m' || $path === '/m/') {
@@ -172,35 +213,74 @@ if (preg_match('/\.(apk|ipa)$/i', (string) $path)) {
     exit;
 }
 
-// Offload /res/* directly to upstream CDN (avoids PHP proxy hop) — always, regardless of cache
-if (stripos($_SERVER['REQUEST_URI'] ?? '', '/res/') !== false) {
+// Offload /res/* directly to upstream CDN only when local disk cache is disabled (CACHE_TTL=0).
+// When CACHE_TTL>0 the request falls through to the reverse-proxy cache path below (isCacheable + serveFile),
+// so the site acts as a full reverse proxy and second hits are served from local disk (X-Proxy-Cache: HIT).
+if (CACHE_TTL === 0 && stripos($_SERVER['REQUEST_URI'] ?? '', '/res/') !== false) {
     $q = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_QUERY);
     $p = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? $path;
     if (preg_match('~/res/.*~i', $p, $m)) $p = $m[0];
-    header('Location: ' . UPSTREAM . $p . ($q ? '?' . $q : ''), true, 302);
+    header('Location: ' . activeUpstream() . $p . ($q ? '?' . $q : ''), true, 302);
     header('Cache-Control: public, max-age=86400');
     exit;
 }
 
-$localFile = CACHE_DIR . '/' . ltrim($path, '/');
+$localFile = cacheFileFor($path);
+$cacheable = CACHE_TTL > 0 && $path !== '/' && $path !== '/index.php' && isCacheable($path);
 
 // Serve cached static assets only — HTML always fetched fresh for injection
-if (CACHE_TTL > 0 && $path !== '/' && $path !== '/index.php' && is_file($localFile) && isCacheable($path)) {
+if ($cacheable && is_file($localFile)) {
     $age = time() - filemtime($localFile);
     if ($age < CACHE_TTL) {
         serveFile($localFile);
         exit;
     }
+    // Expired, and the upstream is currently slow or failing: hand back the copy
+    // we already have instead of letting this visitor wait on it. This is the
+    // difference between a degraded upstream costing a few seconds and it taking
+    // the whole process pool down with it.
+    if (upstreamDegraded() && !shouldRevalidateNow()) {
+        serveFile($localFile, true);
+        exit;
+    }
 }
 
-// Fetch the HTML (or other content) from upstream
-$res = fetchUpstream($fullPath);
+// One request fills a missing entry; concurrent requests wait for that fill
+// briefly instead of all pulling the same file from upstream at once.
+$fillLock = null;
+if ($cacheable && !is_file($localFile)) {
+    $fillLock = cacheFillLock($localFile);
+    if ($fillLock === null) {
+        if (waitForPeerFill($localFile)) {
+            serveFile($localFile);
+            exit;
+        }
+        $fillLock = cacheFillLock($localFile); // peer failed; this request takes over
+    }
+}
+
+// Fetch the HTML (or other content) from upstream. While the upstream is known
+// to be degraded we fail fast instead of holding this process slot for the full
+// timeout: the sooner the slot is free, the more visitors get served.
+$fetchStart = microtime(true);
+$res = fetchUpstream($fullPath, upstreamDegraded() ? 3 : 0);
+noteUpstreamResult($res !== false && $res[2] < 500, microtime(true) - $fetchStart);
 if ($res === false) {
+    // Upstream unreachable. A slightly old copy from disk is far better than an
+    // error page, especially when traffic and an upstream wobble happen together.
+    if (serveStale($path)) {
+        exit;
+    }
     http_response_code(502);
     echo 'Bad Gateway – upstream fetch failed.';
     exit;
 }
 [$body, $contentType, $status, $respHeaders] = $res;
+
+// Same reasoning for a 5xx from upstream: prefer the copy we already have.
+if ($status >= 500 && serveStale($path)) {
+    exit;
+}
 
 // Fix "no internet" on frontend: upstream domainRoute returns 400 request_param_err without proper headers — return minimal success to keep SPA online
 if (stripos($path, '/wps/system/domainRoute') !== false && $status === 400 && stripos($body, 'request_param_err') !== false) {
@@ -219,6 +299,23 @@ foreach ($respHeaders as $h) {
 // Fall back to the file extension when upstream sends no content type
 if (!$contentType) {
     $contentType = guessContentType($path);
+}
+
+// Upstream answers URLs it does not have with its SPA shell (HTML). Serving
+// HTML at a .css/.js/.png URL is useless to the browser (the root .htaccess
+// sets nosniff) and, once caching is on, would store HTML under an asset name
+// and poison every later request. Hand back a real 404 instead.
+$assetExtensions = ['css', 'js', 'mjs', 'map', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico',
+    'webp', 'avif', 'woff', 'woff2', 'ttf', 'otf', 'eot', 'mp4', 'webm', 'mp3', 'wav'];
+$requestedExt = strtolower(pathinfo((string) parse_url((string) $path, PHP_URL_PATH), PATHINFO_EXTENSION));
+if ($requestedExt !== '' && in_array($requestedExt, $assetExtensions, true)
+    && stripos((string) $contentType, 'text/html') !== false) {
+    http_response_code(404);
+    header('Content-Type: text/plain; charset=UTF-8');
+    header('Cache-Control: no-store');
+    header('X-Proxy: true');
+    echo 'Not Found';
+    exit;
 }
 
 // Strip console.* writes from JS/HTML (keep output clean, not clear)
@@ -258,17 +355,9 @@ if (stripos((string) $contentType, 'text/html') !== false) {
     }
 }
 
-// Cache disabled via CACHE_TTL=0 — never write to disk
-if (CACHE_TTL > 0 && isCacheable($path)) {
-    $local = CACHE_DIR . '/' . ltrim($path, '/');
-    if ($status >= 200 && $status < 400) {
-        $dir = dirname($local);
-        if (!is_dir($dir)) {
-            mkdir($dir, 0755, true);
-        }
-        file_put_contents($local, $body);
-    }
-}
+// Output first — the cache write and GC sweep are maintenance, and on a host
+// with a handful of entry processes they must not delay the next visitor (see
+// the deferred block after echo $body).
 
 // Output
 http_response_code($status >= 200 ? $status : 200);
@@ -276,21 +365,41 @@ $finalCT = $contentType ?: 'text/html; charset=UTF-8';
 if (stripos($finalCT, 'charset') === false && stripos($finalCT, 'text/') === 0) {
     $finalCT .= '; charset=UTF-8';
 }
+$isAuth = isAuthTraffic((string) $path);
 header('Content-Type: ' . $finalCT);
-if (stripos((string) $contentType, 'text/html') !== false) {
+if ($isAuth) {
+    // Login/logout responses create or destroy the session: no browser,
+    // proxy, or middlebox may reuse them for another visitor or visit.
+    header('Cache-Control: private, no-store, must-revalidate');
+    header('Vary: Cookie');
+} elseif (stripos((string) $contentType, 'text/html') !== false) {
     header('Cache-Control: no-cache, must-revalidate');
 }
 header('X-Proxy: true');
 header('Connection: close');
-if (stripos((string) $contentType, 'text/html') === false) {
-    // Allow browser caching for static assets (reduces repeat TTFB)
+if (!$isAuth && stripos((string) $contentType, 'text/html') === false) {
+    // Allow browser caching for static assets (reduces repeat TTFB).
+    // Auth traffic keeps the no-store sent above and never lands here.
     header('Cache-Control: public, max-age=86400, immutable');
     header('X-Content-Type-Options: nosniff');
-} else {
-    header('Link: <' . UPSTREAM . '/res/css/vendor.163077c576135e6b923a.css>; rel=preload; as=style', false);
+} elseif (!$isAuth) {
+    header('Link: <' . activeUpstream() . '/res/css/vendor.163077c576135e6b923a.css>; rel=preload; as=style', false);
 }
 header('Content-Length: ' . strlen($body));
 echo $body;
+
+// The client has the bytes. Release the process slot now, then finish the disk
+// work - a cache write and the GC directory scan can be slow with thousands of
+// cached files, and doing them first is exactly what queues up under load.
+finishRequestEarly();
+
+if ($cacheable && $status >= 200 && $status < 400 && cacheStoreAllowed($respHeaders)) {
+    writeCacheFile($localFile, $body);
+    gcCache();
+}
+if ($fillLock !== null) {
+    cacheFillUnlock($fillLock); // waiters are released once the entry is on disk
+}
 
 /* ------------------------------------------------------------------ */
 /*  Helper functions                                                   */
@@ -329,13 +438,280 @@ function upstreamHttpVersionOpt(): array
     return [CURLOPT_HTTP_VERSION => $v];
 }
 
-/**
- * Fetch a path from upstream, forwarding the original HTTP method,
- * body and relevant headers. Returns [body, contentType, statusCode, headers].
- */
-function fetchUpstream(string $path): array|false
+/* --------------------- upstream health (congestion) ---------------------- */
+
+/** Small state file describing how the upstream has just behaved. */
+function upstreamHealthFile(): string
 {
-    $url = UPSTREAM . $path;
+    return CACHE_DIR . '/upstream-health.json';
+}
+
+function upstreamHealthRead(): array
+{
+    $default = ['until' => 0, 'fails' => 0, 'last_ms' => 0];
+    $file = upstreamHealthFile();
+    if (!is_file($file)) {
+        return $default;
+    }
+    $raw = @file_get_contents($file);
+    $d = $raw !== false ? json_decode($raw, true) : null;
+    return is_array($d) ? $d + $default : $default;
+}
+
+function upstreamHealthWrite(array $d): void
+{
+    @file_put_contents(upstreamHealthFile(), json_encode($d), LOCK_EX);
+}
+
+/**
+ * Is the upstream currently slow or failing?
+ *
+ * On a host with a small number of PHP entry processes, one request waiting out
+ * a 6 second upstream stall consumes a whole slot for 6 seconds. This is what
+ * that is measured against.
+ */
+function upstreamDegraded(): bool
+{
+    static $degraded = null;
+    if ($degraded === null) {
+        $d = upstreamHealthRead();
+        $degraded = (int) ($d['until'] ?? 0) > time();
+    }
+    return $degraded;
+}
+
+/** Record the outcome of one fetch, opening or closing the degraded window. */
+function noteUpstreamResult(bool $ok, float $seconds): void
+{
+    $ms = (int) round($seconds * 1000);
+    $cur = upstreamHealthRead();
+    if ($ok && $ms <= UPSTREAM_SLOW_MS) {
+        if ((int) ($cur['until'] ?? 0) !== 0 || (int) ($cur['fails'] ?? 0) !== 0) {
+            upstreamHealthWrite(['until' => 0, 'fails' => 0, 'last_ms' => $ms]);
+        }
+        return;
+    }
+    $fails = (int) ($cur['fails'] ?? 0) + 1;
+    upstreamHealthWrite([
+        'until'   => time() + UPSTREAM_DEGRADED_TTL,
+        'fails'   => $fails,
+        'last_ms' => $ms,
+    ]);
+    error_log('Proxy upstream degraded (' . ($ok ? 'slow' : 'failed') . "): {$ms}ms, fails=$fails, serving cached copies for " . UPSTREAM_DEGRADED_TTL . 's');
+}
+
+/** One request in N still revalidates while degraded. */
+function shouldRevalidateNow(): bool
+{
+    return mt_rand(1, DEGRADED_REVALIDATE_1_IN) === 1;
+}
+
+/* ---------------------------- cache filling ----------------------------- */
+
+/** Exclusive lock for filling one cache entry; null when a peer already holds it. */
+function cacheFillLock(string $file)
+{
+    $dir = dirname($file);
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+        return null;
+    }
+    $fh = @fopen($file . '.lock', 'c');
+    if (!$fh) {
+        return null;
+    }
+    if (!@flock($fh, LOCK_EX | LOCK_NB)) {
+        @fclose($fh);
+        return null;
+    }
+    return $fh;
+}
+
+function cacheFillUnlock($fh): void
+{
+    if (is_resource($fh)) {
+        @flock($fh, LOCK_UN);
+        @fclose($fh);
+    }
+}
+
+/**
+ * Wait for the request that holds the fill lock to finish writing the entry.
+ * Bounded deliberately: if it does not appear in time we fetch it ourselves
+ * rather than tie this visitor's slot to another request's fate.
+ */
+function waitForPeerFill(string $file): bool
+{
+    $deadline = microtime(true) + (CACHE_FILL_WAIT_MS / 1000);
+    while (microtime(true) < $deadline) {
+        usleep(50000);
+        clearstatcache(true, $file);
+        if (is_file($file) && @filesize($file) > 0) {
+            return true;
+        }
+        // The peer released the lock (whether it succeeded or failed). If the file
+        // is still absent it failed, so stop waiting - sitting here for the rest of
+        // the window would be time this visitor's process slot cannot spare.
+        $probe = @fopen($file . '.lock', 'c');
+        if ($probe) {
+            $free = @flock($probe, LOCK_EX | LOCK_NB);
+            if ($free) {
+                @flock($probe, LOCK_UN);
+            }
+            @fclose($probe);
+            if ($free) {
+                return false;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Hand the response to the client and release this process before doing the
+ * disk maintenance. LiteSpeed and PHP-FPM both support this; anything else
+ * just flushes, which still gets the bytes out first.
+ */
+function finishRequestEarly(): void
+{
+    @ignore_user_abort(true);
+    if (function_exists('litespeed_finish_request')) {
+        @litespeed_finish_request();
+        return;
+    }
+    if (function_exists('fastcgi_finish_request')) {
+        @fastcgi_finish_request();
+        return;
+    }
+    if (ob_get_level() > 0) {
+        @ob_end_flush();
+    }
+    @flush();
+}
+
+/**
+ * Ordered list of upstream mirrors to try.
+ *
+ * Order comes from Proxy/upstreams.json (written by upstreams.php, fastest
+ * first), and the configured upstream is then appended so it can never be lost
+ * if the file is missing, malformed, or simply does not mention it. With no
+ * file at all the list is one entry long and nothing about the old behaviour
+ * changes.
+ */
+function upstreamMirrors(): array
+{
+    static $list = null;
+    if ($list !== null) {
+        return $list;
+    }
+    $list = [];
+    $add = static function (string $u) use (&$list): void {
+        $u = rtrim(trim($u), '/');
+        if ($u === '' || !preg_match('#^https?://#i', $u)) {
+            return;
+        }
+        if (!in_array($u, $list, true)) {
+            $list[] = $u;
+        }
+    };
+    $file = __DIR__ . '/upstreams.json';
+    if (is_file($file)) {
+        $raw = @file_get_contents($file);
+        $data = $raw !== false ? json_decode($raw, true) : null;
+        $order = is_array($data) ? ($data['order'] ?? $data) : null;
+        if (is_array($order)) {
+            foreach ($order as $u) {
+                if (is_string($u)) {
+                    $add($u);
+                }
+            }
+        }
+    }
+    $add(UPSTREAM);
+    return $list;
+}
+
+/** Where the current mirror choice is remembered between requests. */
+function upstreamStateFile(): string
+{
+    return CACHE_DIR . '/upstream-fail.json';
+}
+
+/** The demotion record, or null when there is none. */
+function upstreamState(): ?array
+{
+    static $state = false;
+    if ($state !== false) {
+        return $state;
+    }
+    $state = null;
+    $file = upstreamStateFile();
+    if (is_file($file)) {
+        $raw = @file_get_contents($file);
+        $data = $raw !== false ? json_decode($raw, true) : null;
+        if (is_array($data)) {
+            $state = $data;
+        }
+    }
+    return $state;
+}
+
+/**
+ * The upstream to fetch from for this request: the fastest mirror we know of
+ * that has not just failed, falling back to the configured one.
+ */
+function activeUpstream(): string
+{
+    $mirrors = upstreamMirrors();
+    if (!$mirrors) {
+        return '';
+    }
+    $state = upstreamState();
+    if ($state !== null && (int) ($state['until'] ?? 0) > time()) {
+        $pick = (string) ($state['active'] ?? '');
+        if ($pick !== '' && in_array($pick, $mirrors, true)) {
+            return $pick;
+        }
+    }
+    return $mirrors[0];
+}
+
+/**
+ * Stop using a mirror that just failed, for a short while.
+ *
+ * Without this, a dead primary would be retried on every single request and
+ * each visitor would pay the connect timeout before failing over.
+ */
+function demoteUpstream(string $failed): void
+{
+    $mirrors = upstreamMirrors();
+    $n = count($mirrors);
+    if ($n < 2) {
+        return;
+    }
+    $i = array_search($failed, $mirrors, true);
+    if ($i === false) {
+        $i = 0;
+    }
+    $next = $mirrors[($i + 1) % $n];
+    if ($next === $failed) {
+        return;
+    }
+    $payload = json_encode([
+        'active' => $next,
+        'until'  => time() + UPSTREAM_FAIL_TTL,
+        'failed' => $failed,
+    ]);
+    @file_put_contents(upstreamStateFile(), $payload, LOCK_EX);
+}
+
+/**
+ * Fetch one path from one specific mirror.
+ * Returns [body, contentType, statusCode, headers], or false if it never
+ * produced a usable response.
+ */
+function fetchFromUpstream(string $base, string $path, int $maxAttempts = 2, int $timeout = 0): array|false
+{
+    $url = $base . $path;
     $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
     $respHeaders = [];
     $collectHeaders = function ($ch, $line) use (&$respHeaders) {
@@ -372,7 +748,6 @@ function fetchUpstream(string $path): array|false
 
     // Retry on upstream 5xx / timeout (fixes "internet off" on slow /wps/*)
     $attempts = 0;
-    $maxAttempts = 2;
     $lastErr = '';
     $lastStatus = 0;
     $lastCt = false;
@@ -380,7 +755,7 @@ function fetchUpstream(string $path): array|false
     do {
         $ch = curl_init($url);
         $resolve = [];
-        $uh = parse_url(UPSTREAM, PHP_URL_HOST);
+        $uh = parse_url($base, PHP_URL_HOST);
         if ($uh) {
             $ip = @gethostbyname($uh);
             if ($ip && $ip !== $uh && filter_var($ip, FILTER_VALIDATE_IP)) {
@@ -393,7 +768,7 @@ function fetchUpstream(string $path): array|false
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_MAXREDIRS      => 5,
             CURLOPT_CONNECTTIMEOUT => 3,
-            CURLOPT_TIMEOUT        => 6,
+            CURLOPT_TIMEOUT        => $timeout > 0 ? $timeout : 6,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_ENCODING       => '',
             CURLOPT_CUSTOMREQUEST  => $method,
@@ -431,10 +806,17 @@ function fetchUpstream(string $path): array|false
             return [$body, $ct ?: false, $status, $respHeaders];
         }
         $attempts++;
-        if ($attempts < $maxAttempts) {
-            usleep(100000 * $attempts); // 0.1s, 0.2s backoff (was 0.4s)
+        // Retry only when the upstream actually answered (a 5xx). Retrying a
+        // connect/read timeout doubles how long this request holds a process
+        // slot, and on a shared host with a small pool that is the difference
+        // between a slow page and a site that stops answering. A stalled
+        // upstream is handled by the cached copy and the degraded window.
+        if ($body !== false && $err === '' && $attempts < $maxAttempts) {
+            usleep(100000 * $attempts); // 0.1s backoff (was 0.4s)
             $respHeaders = []; // reset for retry
+            continue;
         }
+        break;
     } while ($attempts < $maxAttempts);
 
     error_log("Proxy upstream error after $attempts tries: $lastErr status:$lastStatus url:$url");
@@ -442,6 +824,56 @@ function fetchUpstream(string $path): array|false
         return false;
     }
     return [$lastBody, $lastCt ?: false, $lastStatus, $respHeaders];
+}
+
+/**
+ * Fetch a path from upstream, forwarding the original HTTP method, body and
+ * relevant headers, moving on to the next mirror if this one fails.
+ * Returns [body, contentType, statusCode, headers], or false if every mirror
+ * failed to answer at all.
+ */
+function fetchUpstream(string $path, int $timeout = 0): array|false
+{
+    $mirrors = upstreamMirrors();
+    if (!$mirrors) {
+        return fetchFromUpstream('', $path, 2, $timeout);
+    }
+    $n = count($mirrors);
+    $start = activeUpstream();
+    $i = array_search($start, $mirrors, true);
+    if ($i === false) {
+        $i = 0;
+    }
+    // With only one mirror, keep the old two attempts per request. With several,
+    // one attempt each: retrying a mirror that has already failed just delays
+    // reaching the next one, and the failed mirror gets skipped soon anyway.
+    $perMirrorAttempts = $n > 1 ? 1 : 2;
+    $deadline = microtime(true) + UPSTREAM_FAILOVER_BUDGET;
+    $last5xx = null;
+    for ($tried = 0; $tried < $n; $tried++) {
+        if ($tried > 0 && microtime(true) > $deadline) {
+            error_log('Proxy mirror sweep hit the ' . UPSTREAM_FAILOVER_BUDGET . "s budget after $tried of $n mirrors url:$path");
+            break;
+        }
+        $base = $mirrors[($i + $tried) % $n];
+        $res = fetchFromUpstream($base, $path, $perMirrorAttempts, $timeout);
+        if ($res !== false && $res[2] < 500) {
+            return $res; // healthy answer (a 4xx is a real answer, not a failure)
+        }
+        if ($res !== false) {
+            $last5xx = $res; // mirror is reachable but broken
+        }
+        // Only a mirror that could not answer at all is worth demoting. A 5xx is
+        // usually a momentary upstream hiccup, and skipping the primary for two
+        // minutes because of one would be worse than just retrying it next time -
+        // the sweep already covers the request in hand either way.
+        if ($res === false) {
+            demoteUpstream($base);
+        }
+    }
+    // Nothing worked. Keep a 5xx response if we got one, so the caller's
+    // serveStale()/status handling behaves exactly as it did with one upstream.
+    return $last5xx ?? false;
 }
 
 /**
@@ -461,7 +893,10 @@ function rewriteAndCache(string $html): string
         $quote  = $m[2];
         $rawUrl = $m[3];
         $relPath = preg_replace('#^https?://[^/]+#', '', $rawUrl);
-        if ($doCache) cacheResource($relPath);
+        // Deliberately no cacheResource() here: this callback runs once per
+        // matching URL in the HTML and every call was a blocking upstream
+        // fetch, so the first page view waited on dozens of them. Assets are
+        // cached lazily instead, when the browser actually requests them.
         $cleanPath = preg_replace('/\?.*$/', '', $relPath);
         return $attr . $quote . $cleanPath . $quote;
     }, $html);
@@ -473,7 +908,10 @@ function rewriteAndCache(string $html): string
         $attr   = $m[1];
         $rawUrl = $m[2];
         $relPath = preg_replace('#^https?://[^/]+#', '', $rawUrl);
-        if ($doCache) cacheResource($relPath);
+        // Deliberately no cacheResource() here: this callback runs once per
+        // matching URL in the HTML and every call was a blocking upstream
+        // fetch, so the first page view waited on dozens of them. Assets are
+        // cached lazily instead, when the browser actually requests them.
         $cleanPath = preg_replace('/\?.*$/', '', $relPath);
         return $attr . $cleanPath;
     }, $html);
@@ -481,7 +919,10 @@ function rewriteAndCache(string $html): string
     // Also rewrite inline CSS url() references (e.g. background-image: url(/res/...))
     $html = preg_replace_callback('/url\(\s*["\']?((?:https?:\/\/[^\/]+)?\/res\/[^"\'\)]+)\)["\']?\s*/i', function ($m) use ($doCache) {
         $relPath = preg_replace('#^https?://[^/]+#', '', $m[1]);
-        if ($doCache) cacheResource($relPath);
+        // Deliberately no cacheResource() here: this callback runs once per
+        // matching URL in the HTML and every call was a blocking upstream
+        // fetch, so the first page view waited on dozens of them. Assets are
+        // cached lazily instead, when the browser actually requests them.
         $cleanPath = preg_replace('/\?.*$/', '', $relPath);
         return 'url(' . $cleanPath . ')';
     }, $html);
@@ -521,12 +962,20 @@ function applyBrand(string $body, string $contentType): string
  */
 function brandReplaceText(string $text): string
 {
-    if (BRAND_FROM === '' || BRAND_TO === '') {
+    if (BRAND_TO === '') {
         return $text;
     }
-    if (stripos($text, BRAND_FROM) === false) return $text;
-    $pattern = '/(?<![\w.\/-])' . preg_quote(BRAND_FROM, '/') . '(?!\.[a-z])/i';
-    return preg_replace($pattern, BRAND_TO, $text);
+    // Upstream spells its brand several ways (1333bk, 1333bet, BigAceWin).
+    // Replace every variant so none leaks into titles, text or attributes.
+    // URL/domain guards stay: https://...1333bet..., 1333bet.ai etc. are kept.
+    $variants = array_unique(array_filter([BRAND_FROM, '1333bk', '1333bet', 'BigAceWin']));
+    foreach ($variants as $from) {
+        if ($from === '' || stripos($text, $from) === false) continue;
+        if (strcasecmp($from, BRAND_TO) === 0) continue;
+        $pattern = '/(?<![\w.\/-])' . preg_quote($from, '/') . '(?!\.[a-z])/i';
+        $text = preg_replace($pattern, BRAND_TO, $text);
+    }
+    return $text;
 }
 
 /**
@@ -1349,9 +1798,14 @@ function injectSplashShim(string $html): string
     $splash = <<<'HTML'
 <style id="px-splash-style">#px-splash{position:fixed;inset:0;z-index:999999;background:#0b0e14;display:flex;align-items:center;justify-content:center;transition:opacity .6s ease,visibility .6s}
 #px-splash img{width:100%;height:100%;object-fit:cover;object-position:center;display:block}
-#px-splash.hide{opacity:0;visibility:hidden;pointer-events:none}</style>
+#px-splash.hide{opacity:0;visibility:hidden;pointer-events:none}
+/* Upstream paints its own 1333-branded splash (.loading-img-container,
+   background: var(--s-splash)) ABOVE our shim. Hijack its background to the
+   local BBC99 splash so the old branding can never paint, whatever the
+   timing — then hide it together with our shim. */
+.loading-img-container{background:url(/img/splash.png) no-repeat 50%/cover,#0b0e14!important}</style>
 <div id="px-splash"><img src="/img/splash.png" alt="Loading" fetchpriority="high" decoding="sync"></div>
-<script>(function(){function hide(){var el=document.getElementById("px-splash");if(!el||el.classList.contains("hide"))return;el.classList.add("hide");setTimeout(function(){el.remove();},700);}setTimeout(hide,2200);window.addEventListener("load",function(){setTimeout(hide,400);});var obs=new MutationObserver(function(){var app=document.getElementById("app");if(app&&app.children.length>0){setTimeout(hide,600);obs.disconnect();}});obs.observe(document.documentElement,{childList:true,subtree:true});})();</script>
+<script>(function(){function hide(){var el=document.getElementById("px-splash");if(el)el.classList.add("hide");var up=document.querySelector(".loading-img-container");if(up)up.style.display="none";setTimeout(function(){if(el)el.remove();},700);}setTimeout(hide,2200);window.addEventListener("load",function(){setTimeout(hide,400);});var obs=new MutationObserver(function(){var app=document.getElementById("app");if(app&&app.children.length>0){setTimeout(hide,600);obs.disconnect();}});obs.observe(document.documentElement,{childList:true,subtree:true});})();</script>
 <link rel="preload" as="image" href="/img/splash.png" fetchpriority="high">
 HTML;
     if (preg_match('/<body[^>]*>/i', $html)) {
@@ -1385,14 +1839,17 @@ function cacheResource(string $relPath): void
     }
 
     // Fetch with original path (including query string for cache busting)
-    $url = UPSTREAM . $relPath;
+    $url = activeUpstream() . $relPath;
     $ch = curl_init($url);
     $opts = [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS      => 5,
-        CURLOPT_CONNECTTIMEOUT => 10,
-        CURLOPT_TIMEOUT        => 60,
+        // Hard-bounded on purpose: this runs inside a visitor's request, so a slow
+        // upstream must not hold a PHP worker for a minute - that is exactly what
+        // exhausts the worker pool and makes the whole site look down under load.
+        CURLOPT_CONNECTTIMEOUT => 3,
+        CURLOPT_TIMEOUT        => 8,
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_ENCODING       => '',
         CURLOPT_USERAGENT      => clientUserAgent(),
@@ -1400,7 +1857,7 @@ function cacheResource(string $relPath): void
         CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,
         CURLOPT_HTTPHEADER     => [
             'Accept: */*',
-            'Referer: ' . UPSTREAM . '/',
+            'Referer: ' . activeUpstream() . '/',
         ],
     ] + upstreamHttpVersionOpt();
     $share = upstreamCurlShare();
@@ -1413,7 +1870,84 @@ function cacheResource(string $relPath): void
     curl_close($ch);
 
     if ($data !== false && $code >= 200 && $code < 400) {
-        file_put_contents($local, $data);
+        writeCacheFile($local, $data);
+    }
+}
+
+/**
+ * Write a cache file atomically.
+ *
+ * A plain file_put_contents() can be read back by a concurrent request while it
+ * is still being written, which serves a half-written CSS/JS to that visitor and
+ * keeps doing so until the entry expires. rename() over the same filesystem is
+ * atomic, so a reader only ever sees the old file or the complete new one.
+ */
+function writeCacheFile(string $file, string $data): void
+{
+    $dir = dirname($file);
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+        return;
+    }
+    $tmp = $file . '.tmp.' . getmypid();
+    if (@file_put_contents($tmp, $data) === false) {
+        return;
+    }
+    if (!@rename($tmp, $file)) {
+        @unlink($tmp);
+    }
+}
+
+/**
+ * Serve whatever copy of a path we have on disk, regardless of its age.
+ * Used only when the upstream fetch failed, where stale beats an error page.
+ */
+function serveStale(string $path): bool
+{
+    if (CACHE_TTL === 0 || !isCacheable($path)) {
+        return false;
+    }
+    $file = cacheFileFor($path);
+    if (!is_file($file)) {
+        return false;
+    }
+    serveFile($file, true);
+    return true;
+}
+
+/**
+ * Occasionally delete cache entries that are well past their TTL.
+ *
+ * Expired entries are otherwise only replaced on demand and never removed, so
+ * the cache only grows - and a full disk takes the whole site down. Sampling a
+ * fraction of writes keeps this from costing anything per request.
+ */
+function gcCache(): void
+{
+    if (CACHE_TTL === 0 || mt_rand(1, 200) !== 1) {
+        return;
+    }
+    if (!is_dir(CACHE_DIR)) {
+        return;
+    }
+    $cutoff = time() - (CACHE_TTL * 3);
+    $removed = 0;
+    try {
+        $it = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator(CACHE_DIR, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($it as $entry) {
+            if ($removed >= 300) {
+                break;
+            }
+            if ($entry->isFile() && $entry->getFilename() !== '.htaccess' && $entry->getMTime() < $cutoff) {
+                if (@unlink($entry->getPathname())) {
+                    $removed++;
+                }
+            }
+        }
+    } catch (Exception $e) {
+        return;
     }
 }
 
@@ -1424,6 +1958,7 @@ function cacheResource(string $relPath): void
 function isCacheable(string $path): bool
 {
     if (CACHE_TTL === 0) return false;
+    if (isAuthTraffic($path)) return false; // login/logout: never stored, never served stale
     $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
     if ($method !== 'GET') {
         return false;
@@ -1434,6 +1969,96 @@ function isCacheable(string $path): bool
     $ext = strtolower(pathinfo(parse_url($path, PHP_URL_PATH) ?: '', PATHINFO_EXTENSION));
     return in_array($ext, ['css', 'js', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico',
         'woff', 'woff2', 'ttf', 'webp', 'mp4', 'webm', 'json'], true);
+}
+
+/**
+ * Login/logout traffic. Session identity is created and destroyed here, so
+ * these responses must never sit in any cache (disk, browser, or middlebox).
+ * Matches the app's auth routes (see bundles: /wps/session/login*,
+ * /wps/session/logout, /m/login, /m/logout, loginChange, gameLogout).
+ */
+function isAuthTraffic(string $path): bool
+{
+    $p = strtolower(parse_url($path, PHP_URL_PATH) ?: $path);
+    foreach (['/session/login', '/session/logout', '/m/login', '/m/logout',
+        'gamelogout', 'loginchange', '/verification/'] as $needle) {
+        if (strpos($p, $needle) !== false) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Identity fingerprint of the current visitor, from the headers that carry
+ * session state. Empty when the visitor sent none (anonymous).
+ */
+function requestSessionKey(): string
+{
+    $jar = ($_SERVER['HTTP_COOKIE'] ?? '') . "\n"
+        . ($_SERVER['HTTP_AUTHORIZATION'] ?? '') . "\n"
+        . ($_SERVER['HTTP_ENCRYPTION'] ?? '') . "\n"
+        . ($_SERVER['HTTP_X_GATEWAY_VERSION'] ?? '');
+    return trim(str_replace("\n", '', $jar)) === '' ? '' : md5($jar);
+}
+
+/**
+ * Whether a cacheable path is identical for every visitor (safe on the shared
+ * key) or must be isolated per session. Binary assets and content-hashed
+ * bundles (vendor.0.6ad9d39.js) are the same bytes for all users. Anything
+ * else — JSON, unversioned scripts, extensionless API paths — can carry one
+ * user's data (profile, balance, session) and must never be served to another.
+ */
+function isSharedStatic(string $path): bool
+{
+    if (requestSessionKey() === '') {
+        return true; // anonymous: nothing user-specific can be in play
+    }
+    $p = strtolower(parse_url($path, PHP_URL_PATH) ?: '');
+    $ext = pathinfo($p, PATHINFO_EXTENSION);
+    if (in_array($ext, ['png', 'jpg', 'jpeg', 'gif', 'svg', 'ico',
+        'webp', 'woff', 'woff2', 'ttf', 'mp4', 'webm'], true)) {
+        return true;
+    }
+    if (($ext === 'js' || $ext === 'css') && preg_match('/[0-9a-f]{6,}/i', basename($p))) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Disk location for a cacheable path. Per-session entries live under their own
+ * directory so user A's JSON can never be served to user B; shared statics
+ * keep the existing layout (old entries stay valid).
+ */
+function cacheFileFor(string $path): string
+{
+    $rel = ltrim($path, '/');
+    if (isSharedStatic($path)) {
+        return CACHE_DIR . '/' . $rel;
+    }
+    return CACHE_DIR . '/sess-' . requestSessionKey() . '/' . $rel;
+}
+
+/**
+ * Whether an upstream response may be stored. Responses that set cookies or
+ * are marked private/no-store belong to one visitor and must never be shared.
+ */
+function cacheStoreAllowed(array $respHeaders): bool
+{
+    foreach ($respHeaders as $h) {
+        if (!is_string($h)) continue;
+        if (stripos($h, 'set-cookie:') === 0) {
+            return false;
+        }
+        if (preg_match('/^cache-control\s*:/i', $h)) {
+            $v = strtolower($h);
+            if (strpos($v, 'private') !== false || strpos($v, 'no-store') !== false) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 /**
@@ -1466,14 +2091,19 @@ function guessContentType(string $path): string
 /**
  * Serve a cached file with correct headers.
  */
-function serveFile(string $file): void
+function serveFile(string $file, bool $stale = false): void
 {
     global $contentConfig;
     $mime = guessContentType($file);
     $isHtml = stripos($mime, 'text/html') !== false;
     header('Content-Type: ' . $mime);
-    header('Cache-Control: ' . ($isHtml ? 'no-cache, must-revalidate' : 'public, max-age=' . CACHE_TTL));
-    header('X-Proxy-Cache: HIT');
+    if ($stale) {
+        // Do not let a stale copy sit in a browser cache for the full TTL.
+        header('Cache-Control: public, max-age=60');
+    } else {
+        header('Cache-Control: ' . ($isHtml ? 'no-cache, must-revalidate' : 'public, max-age=' . CACHE_TTL));
+    }
+    header('X-Proxy-Cache: ' . ($stale ? 'STALE' : 'HIT'));
     header('Connection: close');
 
     $data = file_get_contents($file);
