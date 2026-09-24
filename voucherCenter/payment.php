@@ -262,6 +262,8 @@ $existingTrxId = (string) ($order['trxId'] ?? '');
 
 $injection = ''
     . '<div id="countdownBar"><div class="fill" id="countdownFill"></div></div>'
+    . '<a id="payCloseBtn" href="deposit-info.html" aria-label="Close payment page" title="Close"'
+    . ' style="position:fixed;top:12px;right:12px;z-index:9999;width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:22px;line-height:36px;text-align:center;text-decoration:none;font-family:Arial,sans-serif;">&times;</a>'
     . '<style>'
     . '.trx-success{border-color:#27ae60!important}'
     . '#trxConfirmOverlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:10000005;background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:16px}'
