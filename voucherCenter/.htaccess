@@ -3,7 +3,19 @@ DirectoryIndex index_new.php index.php index.html
 Options -Indexes
 <IfModule mod_rewrite.c>
     RewriteEngine On
-    # Always run the branding wrapper, even if index.html is requested directly.
-    RewriteRule ^index\.html$ index_new.php [L]
-    # payment.php is served directly (no rewrite).
+
+    # One canonical URL for this page: /voucherCenter/
+    #
+    # index.html, index.php and the directory all serve the very same document,
+    # so each was its own cache key and the browser stored the same 600 KB+ body
+    # several times over. These redirects live HERE rather than in the parent
+    # .htaccess because a directory's own rules are the ones that run for its
+    # paths - the same rules in the parent were never reached (verified: the
+    # parent's other rules fire, these did not).
+    #
+    # DirectoryIndex still serves index_new.php for /voucherCenter/ itself, so
+    # the branding wrapper keeps running and nothing changes for existing links.
+    RewriteRule ^index\.(html|php)$ /voucherCenter/ [R=301,L,QSA]
+
+    # payment.php and deposit-info.html are served directly (no rewrite).
 </IfModule>

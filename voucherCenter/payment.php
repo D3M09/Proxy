@@ -155,12 +155,15 @@ if (preg_match('/<head>(.*)<\/head>/is', $html, $headMatch)) {
     $origStyles = implode("\n", $styleMatches[0]);
     // Pay.html no longer inlines its CSS bundles; keep the external <link>s.
     preg_match_all('/<link\b[^>]*\brel="stylesheet"[^>]*>/i', $headContent, $linkMatches);
-    $origLinks = implode("\n", $linkMatches[0]);
+    // Pay.html sits one level above payment.php, so its relative css/ paths
+    // need a ../ to resolve from wherever payment.php is served.
+    $origLinks = str_replace('href="css/', 'href="../css/', implode("\n", $linkMatches[0]));
 }
 
 $headReplace = '<head>'
     . '<meta charset="UTF-8">'
     . '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">'
+    . '<meta name="robots" content="noindex,follow">'
     . '<title>Payment - ' . htmlspecialchars($brandName) . '</title>'
     . '<link rel="icon" href="' . htmlspecialchars($siteFavicon, ENT_QUOTES) . '">'
     . '<link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">'

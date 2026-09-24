@@ -34,7 +34,7 @@ if ($vcBase === '' || $vcBase === '.') {
 
 $html = str_replace('/Vcentere/', $vcBase . '/', $html);
 
-$legacyBrands = ['BigAceWin'];
+$legacyBrands = ['BigAceWin', '1333bk', '1333bet'];
 if ($brandTo !== '') {
     foreach (array_unique($legacyBrands) as $from) {
         if ($from === '' || strcasecmp($from, $brandTo) === 0) continue;
@@ -64,6 +64,35 @@ if ($favicon !== '') {
 
 $pmData = payment_methods_data_read();
 $methodsIn = $pmData['methods'] ?? [];
+
+// --- SEO: indexable page, one canonical URL --------------------------------
+// The upstream snapshot ships <meta name="robots" content="noindex">, an empty
+// <link rel="canonical" href=""> and no og:url. Fix all three so crawlers can
+// index this page under a single address instead of split/duplicate variants.
+$canonUrl = 'https://bbc99.bet' . ($vcBase !== '' ? $vcBase : '') . '/';
+$html = preg_replace('/<meta\s+name="robots"[^>]*>/i', '<meta name="robots" content="index,follow">', $html, 1);
+if (stripos($html, 'name="robots"') === false) {
+    $html = preg_replace('/<meta\s+charset[^>]*>/i', '$0' . "\n" . '<meta name="robots" content="index,follow">', $html, 1);
+}
+$html = preg_replace('/<link\s+[^>]*rel="canonical"[^>]*>/i', '<link rel="canonical" href="' . htmlspecialchars($canonUrl, ENT_QUOTES) . '">', $html, 1);
+$ogSeo = '<meta property="og:url" content="' . htmlspecialchars($canonUrl, ENT_QUOTES) . '">';
+if ($brandTo !== '') {
+    $ogSeo .= "\n" . '<meta property="og:site_name" content="' . htmlspecialchars($brandTo, ENT_QUOTES) . '">';
+}
+// Social image was a relative /m/meta-img.png (resolves to a missing file
+// under /voucherCenter/); point it at the absolute proxied copy instead.
+// (Fixes both og:image and twitter:image — they share the same value.)
+$html = str_replace('/m/meta-img.png?v=35163', 'https://bbc99.bet/res/meta-img.png', $html);
+$html = preg_replace('/<\/title>/i', '</title>' . "\n" . $ogSeo, $html, 1);
+$ldBrand = $brandTo !== '' ? $brandTo : $platformName;
+$ldJson = $jenc([
+    '@context'   => 'https://schema.org',
+    '@type'      => 'WebSite',
+    'name'       => $ldBrand,
+    'url'        => $canonUrl,
+    'inLanguage' => 'bn',
+]);
+$html = preg_replace('/<\/body>/i', '<script type="application/ld+json">' . $ldJson . '</script></body>', $html, 1);
 $amountsRaw = $pmData['amounts'] ?? [];
 
 $methodImages = [
@@ -253,6 +282,12 @@ if (strpos($html, 'vcConfirmPopup') === false) {
     $html = str_replace('</body>', '<style>#vcConfirmPopup{display:none;position:fixed;top:0;right:0;bottom:0;left:0;z-index:10000004}#vcConfirmPopup.show{display:block}</style><div class="am-modal am-modal-transparent" id="vcConfirmPopup"><div class="am-modal-mask"></div><div class="am-modal-wrap" role="dialog" aria-modal="true"><div class="am-modal-content"><div class="am-modal-header"><div class="am-modal-title">নিশ্চিতকরণ</div></div><div class="am-modal-body"><div style="zoom:1;overflow:hidden"><div><div>সাফল্য! দয়া করে জমা পৃষ্ঠায় যান</div></div></div></div><div class="am-modal-footer"><div class="am-modal-button-group-v am-modal-button-group-normal" role="group"><a class="am-modal-button" role="button" id="vcConfirmGo">যাও</a></div></div></div></div></div></body>', $html);
 }
 
+// Deposit flow: the static snapshot wires the popup "go" button to
+// deposit-info.html?tracking=... in a NEW tab. The real destination is the
+// per-order payment page in the SAME tab (popup disappears on navigation).
+$html = str_replace("goButton.href = 'deposit-info.html?tracking='", "goButton.href = 'payment.php?tracking='", $html);
+$html = str_replace("goButton.target = '_blank'", "goButton.target = '_self'", $html);
+
 $html = preg_replace('/\sdata-savepage-href="[^"]*"/i', '', $html);
 $html = preg_replace('/<meta\s+name="savepage-[^"]*"[^>]*>/i', '', $html);
 $html = preg_replace('/<meta\s+name="savepage-from"[^>]*>/i', '', $html);
@@ -272,5 +307,46 @@ if ($logo !== '') {
 }
 
 header('Content-Type: text/html; charset=UTF-8');
-header('Cache-Control: no-cache, must-revalidate');
+
+// --- Conditional caching ---------------------------------------------------
+// The page is rebuilt from index.html + the admin config on every request, so
+// its bytes only change when one of those files changes. The old
+// "no-cache, must-revalidate" carried no validator, so every visitor had to
+// re-download the whole document on every navigation. An ETag turns that into
+// a tiny 304, and the short max-age lets repeat views skip the request too.
+$validatorFiles = [
+    __DIR__ . '/index.html',
+    dirname(__DIR__) . '/Proxy/data/settings.json',
+    dirname(__DIR__) . '/Proxy/data/payment-methods.json',
+    dirname(__DIR__) . '/Proxy/data/content.json',
+];
+$lastMod = 0;
+foreach ($validatorFiles as $vf) {
+    $vfMtime = @filemtime($vf);
+    if ($vfMtime !== false && $vfMtime > $lastMod) {
+        $lastMod = $vfMtime;
+    }
+}
+$etag = '"' . md5($html) . '"';
+header('ETag: ' . $etag);
+if ($lastMod > 0) {
+    header('Last-Modified: ' . gmdate('D, d M Y H:i:s', $lastMod) . ' GMT');
+}
+header('Cache-Control: private, max-age=60, must-revalidate');
+
+$ifNoneMatch = trim((string) ($_SERVER['HTTP_IF_NONE_MATCH'] ?? ''));
+$ifModifiedSince = trim((string) ($_SERVER['HTTP_IF_MODIFIED_SINCE'] ?? ''));
+$notModified = false;
+if ($ifNoneMatch !== '') {
+    $notModified = ($ifNoneMatch === '*' || strpos($ifNoneMatch, $etag) !== false);
+} elseif ($ifModifiedSince !== '' && $lastMod > 0) {
+    $since = strtotime($ifModifiedSince);
+    $notModified = ($since !== false && $since >= $lastMod);
+}
+if ($notModified) {
+    http_response_code(304);
+    header('Content-Length: 0');
+    exit;
+}
+
 echo $html;
