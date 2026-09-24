@@ -97,18 +97,22 @@ $methodLabels = [
     'ROCKET' => 'Rocket', 'USDT' => 'USDT',
 ];
 $methodBankImages = [
-    'BKASH' => '/images/banks/bKash.png?v=36b0c4b',
-    'BKASHSM' => '/images/banks/bKash.png?v=36b0c4b',
-    'NAGAD' => '/images/banks/Nagad.png?v=36b0c4b',
-    'NAGADSM' => '/images/banks/Nagad.png?v=36b0c4b',
-    'ROCKET' => '/images/banks/RocketNew.png?v=36b0c4b',
-    'USDT' => '/images/banks/USDT.png?v=36b0c4b',
+    // Local voucher icons (served directly, always present). The old
+    // /images/banks/*.png upstream paths 404, leaving a broken logo.
+    'BKASH' => '/voucherCenter/BKASH/BN_2_20240312225413337.png',
+    'BKASHSM' => '/voucherCenter/BKASHSM/BN_1_20260711012519510.png',
+    'NAGAD' => '/voucherCenter/NAGAD/BN_2_20240312230148421.png',
+    'NAGADSM' => '/voucherCenter/NAGADSM/BN_1_20260711012544019.png',
+    'ROCKET' => '/voucherCenter/ROCKET/BN_2_20240312230029166.png',
+    'USDT' => '/voucherCenter/USDT/786_CN_1.png',
 ];
 
 $methodColor = $methodColors[$method] ?? '#006644';
 $methodLabel = $methodLabels[$method] ?? $method;
 $bankImage = $methodBankImages[$method] ?? '';
 $isSendMoney = (stripos($method, 'SM') !== false || stripos($channel, 'send') !== false);
+// Bangla action terms, chosen by channel: cashout vs send-money.
+$actionBn = $isSendMoney ? 'সেন্ড মানি' : 'ক্যাশআউট';
 
 $html = @file_get_contents(dirname(__DIR__) . '/Pay.html');
 if ($html === false) {
@@ -215,23 +219,28 @@ $html = preg_replace('/<b class="col-12" style="font-size:\s*20px;">BDT\s+[\d,]+
 
 $html = preg_replace('/value="01877668758"/', 'value="' . htmlspecialchars($accountNumber) . '"', $html, 1);
 
-$html = str_replace('NAGAD Deposit', htmlspecialchars($methodLabel) . ' ' . ($isSendMoney ? 'Send Money' : 'Deposit'), $html);
+// Confirmation sentence: rewrite BEFORE the generic NAGAD->label swap below,
+// while the 'NAGAD deposit ...' source text is still intact. \S+ covers the
+// wallet word in any Bengali spelling variant (য় vs য+়).
+$html = preg_replace('/NAGAD\s+deposit\s+\S+\s+নাম্বারে[^<]*/u',
+    htmlspecialchars($methodLabel) . ' ' . $actionBn . ' ওয়ালেট নাম্বারে ' . $actionBn . ' করছেন। এই নাম্বারের অন্য কোন ওয়ালেট থেকে ' . $actionBn . ' করলে সেই টাকা পাওয়ার কোন সম্ভাবনা নাই', $html);
+
+$html = str_replace('NAGAD Deposit', htmlspecialchars($methodLabel) . ' ' . $actionBn, $html);
 $html = str_replace('NAGAD', htmlspecialchars($methodLabel), $html);
 
 $html = preg_replace('/এই\s+' . preg_quote(htmlspecialchars($methodLabel)) . '\s+নাম্বারে[^<]*/',
-    'এই ' . htmlspecialchars($methodLabel) . ' নাম্বারে শুধুমাত্র ' . ($isSendMoney ? 'Send Money' : 'Cashout') . ' গ্রহণ করা হয়', $html);
-
-$html = preg_replace('/NAGAD\s+deposit\s+ওয়ালেট[^<]*/',
-    htmlspecialchars($methodLabel) . ' deposit ওয়ালেট নাম্বারে ক্যাশ আউট করছেন। এই নাম্বারের অন্য কোন ওয়ালেট থেকে ক্যাশ আউট করলে সেই টাকা পাওয়ার কোন সম্ভাবনা নাই', $html);
+    'এই ' . htmlspecialchars($methodLabel) . ' নাম্বারে শুধুমাত্র ' . $actionBn . ' গ্রহণ করা হয়', $html);
 
 if ($bankImage) {
     $html = preg_replace('/\/images\/banks\/[A-Za-z]+\.png/', $bankImage, $html);
 }
 
 $html = preg_replace('/আপনি যদি টাকার পরিমাণ পরিবর্তন করেন \(BDT\s+[\d,]+\)/',
-    'If you change the amount (' . htmlspecialchars($currency) . ' ' . $formattedAmount . ')', $html);
+    'আপনি যদি টাকার পরিমাণ পরিবর্তন করেন (' . htmlspecialchars($currency) . ' ' . $formattedAmount . ')', $html);
 
-$html = str_replace('কম বা বেশি ক্যাশআউট করবেন না', 'Do not cashout more or less', $html);
+$html = str_replace('কম বা বেশি ক্যাশআউট করবেন না', 'কম বা বেশি ' . $actionBn . ' করবেন না', $html);
+$html = str_replace('ক্যাশআউটের TrxID নাম্বারটি লিখুন',
+    ($isSendMoney ? 'সেন্ড মানির TrxID নাম্বারটি লিখুন' : 'ক্যাশআউটের TrxID নাম্বারটি লিখুন'), $html);
 
 $html = preg_replace(
     '/(<button\s+class="q-btn\s+q-btn-item\s+non-selectable\s+no-outline\s+q-btn--outline\s+q-btn--rectangle\s+q-btn--square\s+text-black\s+q-btn--actionable\s+q-focusable\s+q-hoverable\s+q-btn--no-uppercase\s+q-btn--square"\s+tabindex="0"\s+type="button"\s+style=")([^"]*)(">)/',
@@ -249,22 +258,35 @@ $html = preg_replace(
 $expiresAtMs = $expiresAt * 1000;
 
 $expiredClass = $isExpired ? ' show' : '';
+$existingTrxId = (string) ($order['trxId'] ?? '');
 
 $injection = ''
     . '<div id="countdownBar"><div class="fill" id="countdownFill"></div></div>'
     . '<style>'
-    . '#editTrxBtn{display:none;cursor:pointer;padding:8px 12px;background:' . $methodColor . ';color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;margin-left:8px;white-space:nowrap}'
-    . '#editTrxBtn:hover{opacity:.85}'
     . '.trx-success{border-color:#27ae60!important}'
+    . '#trxConfirmOverlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:10000005;background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:16px}'
+    . '#trxConfirmOverlay.show{display:flex}'
+    . '#trxEditWrap{display:none}'
     . '</style>'
+    . '<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>'
     . '<script>'
     . 'var trackingNumber=' . json_encode($tracking) . ';'
     . 'var apiBase=' . json_encode('/api') . ';'
     . 'var expiresAtMs=' . $expiresAtMs . ';'
     . 'var serverNow=' . ($now * 1000) . ';'
     . 'var trxSubmitted=false;'
-    . 'var editWindowMs=5*60*1000;'
-    . 'var trxSubmittedAt=0;'
+    . 'var existingTrxId=' . json_encode($existingTrxId) . ';'
+    . 'var pendingTrx="";'
+
+    . 'function trxInput(){return document.querySelector(".input-red input");}'
+    . 'function submitBtnEl(){return document.getElementById("submitBtn");}'
+    . 'function editWrapEl(){return document.getElementById("trxEditWrap");}'
+    . 'function showEditBtn(){var w=editWrapEl();if(w)w.style.display="flex";}'
+    . 'function hideEditBtn(){var w=editWrapEl();if(w)w.style.display="none";}'
+    . 'function markSubmitted(){var tx=trxInput(),sb=submitBtnEl();trxSubmitted=true;if(tx){tx.readOnly=true;tx.classList.add("trx-success");}if(sb)sb.style.display="none";showEditBtn();}'
+    . 'function markEditable(){var tx=trxInput(),sb=submitBtnEl();trxSubmitted=false;hideEditBtn();if(tx){tx.readOnly=false;tx.classList.remove("trx-success");}if(sb){sb.style.display="";sb.disabled=false;}}'
+    . 'function openTrxConfirm(v){pendingTrx=v;var t=document.getElementById("trxConfirmTrx");if(t)t.textContent=" "+v+" ";var o=document.getElementById("trxConfirmOverlay");if(o)o.classList.add("show");}'
+    . 'function closeTrxConfirm(){var o=document.getElementById("trxConfirmOverlay");if(o)o.classList.remove("show");pendingTrx="";}'
 
     . 'function tick(){'
     . 'var now=Date.now(),remaining=expiresAtMs-now;'
@@ -272,7 +294,7 @@ $injection = ''
     . 'document.getElementById("expiredOverlay").classList.add("show");'
     . 'var tx=document.querySelector(".input-red input");if(tx)tx.disabled=true;'
     . 'var sb=document.getElementById("submitBtn");if(sb)sb.disabled=true;'
-    . 'var eb=document.getElementById("editTrxBtn");if(eb)eb.style.display="none";'
+    . 'hideEditBtn();closeTrxConfirm();'
     . 'return;}'
     . 'var total=10*60*1000,pct=Math.max(0,(remaining/total)*100);'
     . 'document.getElementById("countdownFill").style.width=pct+"%";'
@@ -285,28 +307,60 @@ $injection = ''
     . 'function copyWallet(){var i=document.querySelector("input[readonly]");if(!i)return;var v=i.value;if(!v)return;if(navigator.clipboard){navigator.clipboard.writeText(v)}else{var t=document.createElement("textarea");t.value=v;document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t)}var el=document.querySelector(".q-img.q-img--menu");if(el){var tip=document.createElement("span");tip.textContent="Copied!";tip.style.cssText="position:absolute;top:-30px;left:50%;transform:translateX(-50%);background:#006644;color:#fff;padding:4px 12px;border-radius:4px;font-size:12px;white-space:nowrap;z-index:9999;pointer-events:none;el.style.position="relative";el.appendChild(tip);setTimeout(function(){tip.remove()},1500)}}'
 
     . 'function submitTransaction(){'
-    . 'var sb=document.getElementById("submitBtn");if(sb&&sb.disabled)return;'
-    . 'var tx=document.querySelector(".input-red input");if(!tx)return;var v=tx.value.trim();'
+    . 'var sb=submitBtnEl();if(sb&&(sb.disabled||sb.style.display==="none"))return;'
+    . 'var tx=trxInput();if(!tx)return;var v=tx.value.trim();'
     . 'if(!v){tx.focus();return;}'
+    . 'openTrxConfirm(v);}'
+
+    . 'function doSubmitTransaction(){'
+    . 'var sb=submitBtnEl();var tx=trxInput();'
+    . 'var v=tx?tx.value.trim():pendingTrx;if(pendingTrx)v=pendingTrx;if(!v)return;'
+    . 'closeTrxConfirm();'
     . 'if(sb)sb.disabled=true;'
     . 'fetch(apiBase+"/submitTransaction.php",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({trackingNumber:trackingNumber,trxId:v})})'
     . '.then(function(r){return r.json()})'
     . '.then(function(d){if(d.success){'
-    . 'trxSubmitted=true;trxSubmittedAt=Date.now();'
-    . 'tx.readOnly=true;tx.classList.add("trx-success");'
-    . 'sb.style.display="none";'
-    . 'var eb=document.getElementById("editTrxBtn");if(eb)eb.style.display="inline-block";'
-    . 'setTimeout(function(){if(trxSubmitted)var eb2=document.getElementById("editTrxBtn");if(eb2)eb2.style.display="none";},editWindowMs);'
+    . 'if(tx&&tx.value.trim()!==v)tx.value=v;'
+    . 'markSubmitted();'
     . '}else{if(sb)sb.disabled=false;}})'
     . '.catch(function(){if(sb)sb.disabled=false;})}'
 
-    . 'function editTrx(){'
-    . 'var tx=document.querySelector(".input-red input");if(!tx)return;'
-    . 'var eb=document.getElementById("editTrxBtn");if(eb)eb.style.display="none";'
-    . 'tx.readOnly=false;tx.value="";tx.focus();tx.classList.remove("trx-success");'
-    . 'var sb=document.getElementById("submitBtn");if(sb){sb.style.display="inline-block";sb.disabled=false;}'
-    . 'trxSubmitted=false;}'
+    . 'function requestEditTrx(){'
+    . 'var tx=trxInput();if(!tx)return;'
+    . 'var hasValue=trxSubmitted||tx.value.trim()!=="";'
+    . 'if(!hasValue){markEditable();tx.focus();return;}'
+    . 'var proceed=function(){var sb=submitBtnEl();hideEditBtn();tx.readOnly=false;tx.value="";tx.focus();tx.classList.remove("trx-success");if(sb){sb.style.display="";sb.disabled=false;}trxSubmitted=false;};'
+    . 'if(window.Swal&&Swal.fire){Swal.fire({icon:"warning",title:"Order has already bind Transaction ID, are you sure you want to change?",showCancelButton:true,confirmButtonText:"Yes",cancelButtonText:"No"}).then(function(r){if(r&&r.isConfirmed)proceed();});}'
+    . 'else{if(window.confirm("Order has already bind Transaction ID, are you sure you want to change?"))proceed();}}'
+    . 'function editTrx(){requestEditTrx();}'
+
+    . 'function ensureEditButton(){'
+    . 'var tx=trxInput();if(!tx||document.getElementById("trxEditWrap"))return;'
+    . 'var control=tx.closest(".q-field__control");'
+    . 'var wrap=document.createElement("div");wrap.className="q-field__append q-field__marginal row no-wrap items-center";wrap.id="trxEditWrap";wrap.style.display="none";'
+    . 'var btn=document.createElement("button");btn.className="q-btn q-btn-item non-selectable no-outline q-btn--outline q-btn--rectangle q-btn--rounded text-green q-btn--actionable q-focusable q-hoverable q-btn--no-uppercase";btn.type="button";btn.id="editTrxBtn";'
+    . 'var content=document.createElement("span");content.className="q-btn__content text-center col items-center q-anchor--skip justify-center row no-wrap text-no-wrap";'
+    . 'var icon=document.createElement("i");icon.className="q-icon on-left mdi mdi-pencil";icon.setAttribute("aria-hidden","true");icon.setAttribute("role","img");icon.textContent="";'
+    . 'var label=document.createElement("span");label.className="block";label.textContent="";'
+    . 'content.appendChild(icon);content.appendChild(label);btn.appendChild(content);'
+    . 'var helper=document.createElement("span");helper.className="q-focus-helper";btn.appendChild(helper);'
+    . 'label.textContent="\\u09AA\\u09B0\\u09BF\\u09AC\\u09B0\\u09CD\\u09A4\\u09A8 \\u0995\\u09B0\\u09C1\\u09A8";'
+    . 'icon.textContent="\\u2710";'
+    . 'btn.addEventListener("click",function(e){e.preventDefault();requestEditTrx();});'
+    . 'wrap.appendChild(btn);'
+    . 'if(control)control.appendChild(wrap);else if(tx.parentNode)tx.parentNode.appendChild(wrap);}'
+    . 'function bootTrx(){'
+    . 'ensureEditButton();'
+    . 'var tx=trxInput();'
+    . 'if(tx){tx.addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();submitTransaction();}});}'
+    . 'var cc=document.getElementById("trxConfirmCancel");if(cc)cc.addEventListener("click",function(){closeTrxConfirm();var sb=submitBtnEl();if(sb)sb.disabled=false;});'
+    . 'var ok=document.getElementById("trxConfirmOk");if(ok)ok.addEventListener("click",function(){doSubmitTransaction();});'
+    . 'var ov=document.getElementById("trxConfirmOverlay");if(ov)ov.addEventListener("click",function(e){if(e.target===ov){closeTrxConfirm();var sb2=submitBtnEl();if(sb2)sb2.disabled=false;}});'
+    . 'if(existingTrxId&&tx){tx.value=existingTrxId;if(Date.now()<expiresAtMs){markSubmitted();}else{tx.readOnly=true;tx.disabled=true;hideEditBtn();}}}'
+    . 'bootTrx();'
     . '</script>'
+
+    . '<div id="trxConfirmOverlay"><div class="q-card column no-wrap flex-center" style="width: 600px; max-width: 90vw;"><div class="q-card__section q-card__section--vert text-center q-pa-lg" style="font-size: 16px;"><span class="text-grey-8">This order can only be submitted once, please confirm your Transaction ID:</span><span class="text-red" id="trxConfirmTrx"></span><span class="text-grey-8">is correct!</span></div><div class="q-card__actions justify-center q-card__actions--horiz row q-pa-lg"><button class="q-btn q-btn-item non-selectable no-outline q-btn--standard q-btn--rectangle q-btn--rounded q-btn--actionable q-focusable q-hoverable q-btn--no-uppercase" id="trxConfirmCancel" style="padding: 4px 32px; min-width: 0px; min-height: 0px; background: rgb(204, 204, 204); color: rgb(48, 48, 48);" tabindex="0" type="button"><span class="q-focus-helper"></span><span class="q-btn__content text-center col items-center q-anchor--skip justify-center row no-wrap text-no-wrap"><span class="block">Cancel</span></span></button><button class="q-btn q-btn-item non-selectable no-outline q-btn--standard q-btn--rectangle q-btn--rounded q-btn--actionable q-focusable q-hoverable q-btn--no-uppercase text-white" id="trxConfirmOk" style="padding: 4px 32px; min-width: 0px; min-height: 0px; background: linear-gradient(rgb(0, 102, 68), rgb(0, 102, 68));" tabindex="0" type="button"><span class="q-focus-helper"></span><span class="q-btn__content text-center col items-center q-anchor--skip justify-center row no-wrap text-no-wrap"><span class="block">Confirm</span></span></button></div></div></div>'
 
     . '<div id="expiredOverlay"' . $expiredClass . '><div id="expiredCard">'
     . '<div class="icon">&#x2717;</div>'
@@ -316,12 +370,6 @@ $injection = ''
     . '</div></div>';
 
 $html = str_replace('</body>', $injection . '</body>', $html);
-
-$html = str_replace(
-    '<span class="block">নিশ্চিত</span></span></button>',
-    '<span class="block">নিশ্চিত</span></span></button><button id="editTrxBtn" onclick="editTrx()" style="display:none">Edit TRX</button>',
-    $html
-);
 
 if ($isExpired) {
     $html = str_replace('id="submitBtn"', 'id="submitBtn" disabled', $html);
