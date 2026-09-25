@@ -96,8 +96,7 @@
   var back = document.querySelector('.am-navbar-left');
   if (back) {
     back.addEventListener('click', function () {
-      if (history.length > 1) history.back();
-      else location.href = 'index.html';
+      location.href = '/m/member/home';
     });
   }
 
@@ -123,15 +122,21 @@
       text('.pay-way-msg-info', 'অর্ডার পাওয়া যায়নি');
     });
 
-  // Footer: [লেনদেন রেকর্ড] [জমা দিতে সম্পূর্ণ] [অন্য একটি]
+  // Footer: [লেনদেন রেকর্ড] -> voucher center, [জমা দিতে সম্পূর্ণ] -> payment,
+  // [অন্য একটি] -> member home.
   var buttons = document.querySelectorAll('.voucher-msg-v2-footer .voucher-btn');
+  if (buttons[0]) {
+    buttons[0].addEventListener('click', function () {
+      location.href = '/voucherCenter/';
+    });
+  }
   if (buttons[1]) {
     buttons[1].addEventListener('click', function () {
       location.href = 'payment.php?tracking=' + encodeURIComponent(tracking);
     });
   }
   if (buttons[2]) {
-    buttons[2].addEventListener('click', function () { location.href = 'index.html'; });
+    buttons[2].addEventListener('click', function () { location.href = '/m/member/home'; });
   }
 })();
 </script>
