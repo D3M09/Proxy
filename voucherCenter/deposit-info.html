@@ -123,7 +123,7 @@
     });
 
   // Footer: [লেনদেন রেকর্ড] -> voucher center, [জমা দিতে সম্পূর্ণ] -> payment,
-  // [অন্য একটি] -> member home.
+  // [অন্য একটি] -> voucher center.
   var buttons = document.querySelectorAll('.voucher-msg-v2-footer .voucher-btn');
   if (buttons[0]) {
     buttons[0].addEventListener('click', function () {
@@ -136,7 +136,7 @@
     });
   }
   if (buttons[2]) {
-    buttons[2].addEventListener('click', function () { location.href = '/m/member/home'; });
+    buttons[2].addEventListener('click', function () { location.href = '/voucherCenter/'; });
   }
 })();
 </script>
