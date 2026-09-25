@@ -29,6 +29,10 @@ function boot_session(string $name): void
     if (session_status() === PHP_SESSION_ACTIVE) {
         return;
     }
+    // Refuse a session id the server never issued (session fixation) and never
+    // accept one from the URL, so a crafted link cannot plant a session.
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.use_only_cookies', '1');
     session_name($name);
     session_set_cookie_params([
         'httponly' => true,
@@ -37,6 +41,76 @@ function boot_session(string $name): void
         'path' => '/',
     ]);
     session_start();
+}
+
+/** Cookie the console's colour theme is remembered in. */
+const SC_THEME_COOKIE = 'sc_theme';
+
+/**
+ * Which console theme this request should be painted in.
+ *
+ * The console ships dark; "light" is the opt-out the toggle stores. The cookie
+ * is read here rather than by a script so the attribute is already on <body> in
+ * the first byte of HTML: no flash of the other theme, and no pre-paint inline
+ * script to allow through the nonce-based CSP. The value is compared against a
+ * fixed list, so nothing from the request is ever echoed back.
+ *
+ * @return string "dark" or "light"
+ */
+function console_theme(): string
+{
+    $value = $_COOKIE[SC_THEME_COOKIE] ?? '';
+    return is_string($value) && $value === 'light' ? 'light' : 'dark';
+}
+
+/**
+ * Once-per-request nonce for the console's inline script.
+ *
+ * A nonce lets the console run its own <script> while a Content-Security-Policy
+ * that omits 'unsafe-inline' still blocks any script an attacker manages to
+ * inject into the page.
+ */
+function csp_nonce(): string
+{
+    static $nonce = null;
+    if ($nonce === null) {
+        $nonce = bin2hex(random_bytes(16));
+    }
+    return $nonce;
+}
+
+/**
+ * Baseline security headers. Call before anything is echoed.
+ *
+ * @param string $frameAncestors Who may frame this response ("'none'" or
+ *        "'self'"). Pages meant to be embedded elsewhere should pass 'self'.
+ * @param array<string,string> $csp Extra Content-Security-Policy directives.
+ *        Values are emitted verbatim, so quote keywords: "'self'".
+ */
+function security_headers(string $frameAncestors = "'none'", array $csp = []): void
+{
+    if (headers_sent()) {
+        return;
+    }
+    header('X-Content-Type-Options: nosniff');
+    header('Referrer-Policy: no-referrer');
+    header('X-Frame-Options: ' . ($frameAncestors === "'none'" ? 'DENY' : 'SAMEORIGIN'));
+    header('Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()');
+    if (is_https()) {
+        header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+    }
+
+    // Every response gets a CSP; object/base are refused unconditionally so an
+    // injected <object> or <base> cannot be used either.
+    $csp['frame-ancestors'] = $frameAncestors;
+    $csp['object-src'] = "'none'";
+    $csp['base-uri'] = "'none'";
+    $directives = [];
+    foreach ($csp as $name => $value) {
+        // A valueless directive (sandbox) must not be emitted with a stray space.
+        $directives[] = trim($name . ' ' . $value);
+    }
+    header('Content-Security-Policy: ' . implode('; ', $directives));
 }
 
 /** @param array<string,mixed> $payload */
@@ -76,6 +150,40 @@ function param(string $key, int $max = 2000, bool $fromGet = false): string
 function client_ip(): string
 {
     return (string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+}
+
+/**
+ * The host this install is being reached on.
+ *
+ * $_SERVER['HTTP_HOST'] is taken straight from the client's Host header, so it
+ * is never used verbatim. It is accepted only when it looks like a hostname or
+ * an IP with an optional port; anything carrying quotes, angle brackets,
+ * slashes or whitespace falls back to a safe default. That keeps a crafted Host
+ * header from breaking out of an HTML attribute or a <script> block, and from
+ * being baked into absolute URLs the page then hands to the browser.
+ */
+function safe_host(string $fallback = 'localhost'): string
+{
+    $host = str_replace("\0", '', (string) ($_SERVER['HTTP_HOST'] ?? ''));
+    $isIpv6 = preg_match('/^\[[0-9a-fA-F:.]+\](?::\d{1,5})?$/', $host) === 1;
+    $isName = preg_match('/^[A-Za-z0-9](?:[A-Za-z0-9.\-]{0,252})?(?::\d{1,5})?$/', $host) === 1;
+    return $isIpv6 || $isName ? $host : $fallback;
+}
+
+/**
+ * Raw User-Agent header, trimmed of control characters and length-capped.
+ *
+ * Stored with a new conversation so the agent console can show which browser
+ * and platform the visitor is on. It is never echoed back to the browser.
+ */
+function client_user_agent(): string
+{
+    $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
+    if (!is_string($ua)) {
+        return '';
+    }
+    $ua = str_replace(["\0", "\r", "\n"], ' ', $ua);
+    return mb_substr(trim($ua), 0, 255);
 }
 
 function csrf_token(): string

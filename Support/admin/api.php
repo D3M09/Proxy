@@ -15,6 +15,7 @@ require dirname(__DIR__) . '/lib/bootstrap.php';
 require __DIR__ . '/partials.php';
 
 header('X-Robots-Tag: noindex');
+security_headers("'none'");
 
 if (($_SESSION['agent'] ?? false) !== true) {
     json_out(['ok' => false, 'error' => 'Not signed in.'], 401);
@@ -34,6 +35,27 @@ function console_presence(Store $store, string $id): array
         ],
         'read' => $store->presence($id)['read'],
     ];
+}
+
+/**
+ * Apply the console's current queue filter, read from the request.
+ *
+ * The console sends ?filter=…&agent=… (GET on polls, POST on a reply), so a
+ * refresh re-renders exactly the slice that is on screen instead of widening
+ * the list back to every conversation.
+ *
+ * @param list<array<string,mixed>> $rows
+ * @return list<array<string,mixed>>
+ */
+function api_queue_rows(array $rows): array
+{
+    $filter = param('filter', 12, true) ?: param('filter', 12);
+    if (!in_array($filter, console_filters(), true)) {
+        $filter = 'all';
+    }
+    $agentFilter = param('agent', 12, true) ?: param('agent', 12);
+
+    return filter_rows($rows, $filter, $agentFilter, (string) ($_SESSION['agent_id'] ?? ''));
 }
 
 // A typing ping changes state, so it is a POST carrying a CSRF token.
@@ -86,23 +108,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && param('what', 20) === 'reply') {
         json_out(['ok' => false, 'error' => 'The reply could not be saved.'], 409);
     }
 
+    // First human reply joins the chat: claim it so the visitor's
+    // "Agent session" bar shows who is responding.
+    $me = (string) ($_SESSION['agent_id'] ?? '');
+    if ($me !== '' && (string) ($existing['assignee'] ?? '') === '') {
+        $store->setAssignee($replyId, $me, $me);
+        $updated = $store->get($replyId) ?? $updated;
+    }
+
     // The agent just looked at it: clear unread, advance read mark, drop typing.
-    $store->poll($replyId, 0, Store::ROLE_AGENT);
+    $afterPoll = $store->poll($replyId, 0, Store::ROLE_AGENT);
     $total = count($updated['messages'] ?? []);
     $store->markRead($replyId, Store::ROLE_AGENT, $total);
     $store->clearTyping($replyId, Store::ROLE_AGENT);
 
-    $newMessages = array_slice($updated['messages'] ?? [], $countBefore);
+    $replyAll = $updated['messages'] ?? [];
+    $newMessages = array_slice($replyAll, $countBefore);
+    // The message before the slice: it keeps the day separator from repeating
+    // on every incremental poll.
+    $prevAt = $countBefore > 0 ? (int) ($replyAll[$countBefore - 1]['at'] ?? 0) : null;
     $rows = $store->listConversations();
 
     json_out([
         'ok' => true,
-        'messages_html' => render_messages($newMessages, $replyId, $countBefore),
+        'messages_html' => render_messages($newMessages, $replyId, $countBefore, $prevAt),
         'cursor' => $total,
         'total' => $total,
         'status' => (string) ($updated['status'] ?? 'open'),
+        'agent_unread' => (int) ($afterPoll['conversation']['agent_unread'] ?? 0),
         'presence' => console_presence($store, $replyId),
-        'list_html' => render_list_items($rows, $replyId),
+        'list_html' => render_list_items(api_queue_rows($rows), $replyId, $agents->byId()),
         'unread' => $store->unreadCount($rows),
     ]);
 }
@@ -116,7 +151,7 @@ try {
             $rows = $store->listConversations();
             json_out([
                 'ok' => true,
-                'list_html' => render_list_items($rows, $id !== '' ? $id : null),
+                'list_html' => render_list_items(api_queue_rows($rows), $id !== '' ? $id : null, $agents->byId()),
                 'unread' => $store->unreadCount($rows),
                 'total' => count($rows),
             ]);
@@ -134,19 +169,29 @@ try {
                 json_out(['ok' => false, 'error' => 'Conversation not found.'], 404);
             }
 
-            $total = count($result['conversation']['messages'] ?? []);
+            $threadAll = $result['conversation']['messages'] ?? [];
+            $total = count($threadAll);
+            $prevAt = $after > 0 ? (int) ($threadAll[$after - 1]['at'] ?? 0) : null;
 
             // The agent is looking at the thread, so their read mark advances.
             $store->markRead($id, Store::ROLE_AGENT, $total);
 
+            // Reading a thread clears its unread counter, so the queue and the
+            // unread badge come along — the console only re-renders the list
+            // when the total actually changed.
+            $rows = $store->listConversations();
+
             json_out([
                 'ok' => true,
-                'messages_html' => render_messages($result['messages'], $id, $after),
+                'messages_html' => render_messages($result['messages'], $id, $after, $prevAt),
                 'cursor' => $total,
                 // Client cursor ran past the end (history trimmed/deleted).
                 'reset' => $after > $total,
                 'status' => (string) ($result['conversation']['status'] ?? 'open'),
                 'total' => $total,
+                'agent_unread' => (int) ($result['conversation']['agent_unread'] ?? 0),
+                'list_html' => render_list_items(api_queue_rows($rows), $id, $agents->byId()),
+                'unread' => $store->unreadCount($rows),
                 'presence' => console_presence($store, $id),
             ]);
             // no break (json_out exits)

@@ -19,6 +19,7 @@ declare(strict_types=1);
 require __DIR__ . '/lib/bootstrap.php';
 
 header('X-Robots-Tag: noindex');
+security_headers("'none'");
 
 $action = param('action', 20, isset($_GET['action']));
 $bindToSession = ($config['bind_chat_to_session'] ?? false) === true;
@@ -78,6 +79,13 @@ function shape_messages(array $messages, int $offset): array
             ];
         }
 
+        // Menu-tree follow-up buttons attached to the agent message, so the
+        // widget can render them as tappable options (tree.txt flow).
+        $menu = is_array($m['menu'] ?? null) ? array_values(array_filter($m['menu'], 'is_string')) : [];
+        if ($menu !== []) {
+            $entry['menu'] = $menu;
+        }
+
         $out[] = $entry;
     }
     return $out;
@@ -110,6 +118,152 @@ function auto_reply_for(string $message, array $config): ?string
 }
 
 /**
+ * Tutorial images configured for a visitor message, or [] when none match.
+ * Exact (trimmed) match only — same rule as the text auto-reply. Only paths
+ * under assets/tutorials/ are accepted, so config cannot point elsewhere.
+ *
+ * @param array<string,mixed> $config
+ * @return list<string>
+ */
+function auto_reply_media_for(string $message, array $config): array
+{
+    $map = $config['auto_reply_media'] ?? null;
+    if (!is_array($map)) {
+        return [];
+    }
+    $needle = trim($message);
+    if ($needle === '') {
+        return [];
+    }
+    foreach ($map as $trigger => $files) {
+        if (is_string($trigger) && is_array($files) && trim($trigger) === $needle) {
+            $out = [];
+            foreach ($files as $rel) {
+                if (is_string($rel)
+                    && preg_match('#^assets/tutorials/[A-Za-z0-9_.\-]+\.(jpg|jpeg|png|gif|webp)$#', $rel) === 1
+                ) {
+                    $out[] = $rel;
+                }
+            }
+            return $out;
+        }
+    }
+    return [];
+}
+
+/**
+ * Copy a tutorial image into data/uploads/ as a chat attachment record.
+ *
+ * Each auto-reply gets fresh random tokens (one copy per conversation), so the
+ * media.php capability check — token must be referenced by that conversation —
+ * keeps working exactly as it does for visitor/agent uploads.
+ *
+ * @param array<string,mixed> $config
+ * @return array{token:string,mime:string,name:string,size:int}|null
+ */
+function materialize_tutorial_media(string $rel, array $config): ?array
+{
+    $src = __DIR__ . '/' . str_replace('/', DIRECTORY_SEPARATOR, $rel);
+    $real = realpath($src);
+    $base = realpath(__DIR__ . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'tutorials');
+    if ($real === false || $base === false || strpos($real, $base) !== 0 || !is_file($real)) {
+        return null;
+    }
+    // Trust the file's real content, never the extension.
+    $mime = detect_mime($real);
+    $allowed = is_array($config['allowed_media'] ?? null) ? $config['allowed_media'] : [];
+    if (!isset($allowed[$mime])) {
+        return null;
+    }
+    $dir = rtrim((string) $config['data_dir'], "/\\") . DIRECTORY_SEPARATOR . 'uploads';
+    if (!is_dir($dir) && !@mkdir($dir, 0700, true) && !is_dir($dir)) {
+        return null;
+    }
+    $token = bin2hex(random_bytes(16));
+    if (!@copy($real, $dir . DIRECTORY_SEPARATOR . $token)) {
+        return null;
+    }
+    @chmod($dir . DIRECTORY_SEPARATOR . $token, 0600);
+
+    return [
+        'token' => $token,
+        'mime' => $mime,
+        'name' => basename($rel),
+        'size' => (int) (filesize($real) ?: 0),
+    ];
+}
+
+/** Send the tutorial images for a visitor message as agent attachment messages. */
+function send_auto_reply_media(string $id, string $message, array $config, Store $store): void
+{
+    foreach (auto_reply_media_for($message, $config) as $rel) {
+        try {
+            $file = materialize_tutorial_media($rel, $config);
+        } catch (Throwable $e) {
+            error_log('[support-center] auto-reply media: ' . $e->getMessage());
+            continue;
+        }
+        if ($file === null) {
+            continue;
+        }
+        // Stop on a full/closed conversation; the text reply above is kept.
+        if ($store->addMessage($id, Store::ROLE_AGENT, '', $file) === null) {
+            break;
+        }
+    }
+}
+
+/**
+ * Answer a visitor message from the menu tree (tree.txt flow).
+ *
+ * Posts the node text, then its tutorial images, attaching the follow-up
+ * option buttons to the last message of the burst so they render once.
+ * Returns true when the message matched a menu node.
+ */
+function send_menu_reply(string $id, string $message, array $config, Store $store): bool
+{
+    $node = menu_find($message);
+    if ($node === null) {
+        return false;
+    }
+    $options = menu_options_for($node);
+    $menu = $options === [] ? null : $options;
+    $media = menu_media_for($node);
+    // Menu media uses the same assets/tutorials/ whitelist as legacy replies.
+    $media = array_values(array_filter($media, static fn ($rel): bool =>
+        is_string($rel) && preg_match('#^assets/tutorials/[A-Za-z0-9_.\-]+\.(jpg|jpeg|png|gif|webp)$#', $rel) === 1));
+
+    // Materialize first: if every image fails, the options still have a home
+    // on the text message instead of being lost.
+    $files = [];
+    foreach ($media as $rel) {
+        try {
+            $file = materialize_tutorial_media($rel, $config);
+        } catch (Throwable $e) {
+            error_log('[support-center] menu media: ' . $e->getMessage());
+            continue;
+        }
+        if ($file !== null) {
+            $files[] = $file;
+        }
+    }
+
+    if ($files === []) {
+        $store->addMessage($id, Store::ROLE_AGENT, menu_text_for($node), null, $menu);
+        return true;
+    }
+
+    $store->addMessage($id, Store::ROLE_AGENT, menu_text_for($node));
+    $last = count($files) - 1;
+    foreach ($files as $i => $file) {
+        if ($store->addMessage($id, Store::ROLE_AGENT, '', $file, $i === $last ? $menu : null) === null) {
+            break;
+        }
+    }
+    return true;
+}
+
+/**
  * Presence as the browser needs it: whether either side is typing right now, and
  * how many messages each side has read (used for the Seen marker).
  *
@@ -138,6 +292,37 @@ function shape_conversation(array $conversation): array
     ];
 }
 
+/**
+ * The agent currently handling the chat, for the visitor's "Agent session"
+ * bar. Only the display name, photo and online state are exposed — never
+ * handles, hashes or roster internals. Null while no human has joined
+ * (bot auto-replies do not count as joining).
+ *
+ * @param array<string,mixed>|null $conversation
+ * @return array{name:string,photo:string,online:bool,since:int}|null
+ */
+function shape_agent(?array $conversation): ?array
+{
+    $assignee = (string) ($conversation['assignee'] ?? '');
+    if ($assignee === '' || $conversation === null) {
+        return null;
+    }
+    $roster = $GLOBALS['agents'] ?? null;
+    if (!is_object($roster) || !method_exists($roster, 'find') || !method_exists($roster, 'isOnline')) {
+        return null;
+    }
+    $agent = $roster->find($assignee);
+    if (!is_array($agent)) {
+        return null;
+    }
+    return [
+        'name' => (string) ($agent['name'] ?? ''),
+        'photo' => (string) ($agent['photo'] ?? ''),
+        'online' => (bool) $roster->isOnline($agent),
+        'since' => (int) ($conversation['assignee_at'] ?? 0),
+    ];
+}
+
 try {
     switch ($action) {
         case 'start':
@@ -145,9 +330,11 @@ try {
                 fail('Use POST for this action.', 405);
             }
 
-            // Light spam control: 20 new chats per IP per 15 minutes.
+            // Light spam control on starting new chats. The key is namespaced so
+            // this budget is separate from message sending: see chat_start_* in
+            // config.php for the numbers.
             $limiter = $throttle('chat_start');
-            if ($limiter->retryAfter(client_ip()) > 0) {
+            if ($limiter->retryAfter('chat-start:' . client_ip()) > 0) {
                 fail('Too many conversations started from this network. Please try again later.', 429);
             }
 
@@ -172,15 +359,24 @@ try {
                 fail('That email address does not look valid.');
             }
 
-            $limiter->hit(client_ip());
+            $limiter->hit('chat-start:' . client_ip());
 
-            $id = $store->create($name, $email, $message, param('page', 200), $upload);
+            // The IP and User-Agent are recorded once, when the conversation
+            // starts: the console's visitor panel shows them to the agent.
+            $id = $store->create($name, $email, $message, param('page', 200), $upload, [
+                'ip' => client_ip(),
+                'ua' => client_user_agent(),
+            ]);
             bind_chat($id);
 
-            // Scripted auto-reply, like the reference consultant widget.
-            $autoReply = auto_reply_for($message, $config);
-            if ($autoReply !== null) {
-                $store->addMessage($id, Store::ROLE_AGENT, $autoReply);
+            // Menu-tree reply (tree.txt flow) first; legacy scripted replies
+            // stay as the fallback for anything outside the tree.
+            if (!send_menu_reply($id, $message, $config, $store)) {
+                $autoReply = auto_reply_for($message, $config);
+                if ($autoReply !== null) {
+                    $store->addMessage($id, Store::ROLE_AGENT, $autoReply);
+                    send_auto_reply_media($id, $message, $config, $store);
+                }
             }
 
             $conversation = $store->get($id);
@@ -193,6 +389,7 @@ try {
                 'messages' => shape_messages($conversation['messages'] ?? [], 0),
                 'total' => $total,
                 'presence' => shape_presence($store, $id),
+                'agent' => shape_agent($conversation),
             ]);
             // no break (json_out exits)
 
@@ -206,8 +403,10 @@ try {
                 fail('Conversation not found. Please start a new chat.', 404);
             }
 
+            // Separate budget from chat_start, so a long conversation is not
+            // capped by how many chats the visitor has opened.
             $limiter = $throttle('chat_send');
-            if ($limiter->retryAfter(client_ip()) > 0) {
+            if ($limiter->retryAfter('chat-send:' . client_ip()) > 0) {
                 fail('You are sending messages too quickly. Please wait a moment.', 429);
             }
 
@@ -223,7 +422,7 @@ try {
                 fail('Message is empty.');
             }
 
-            $limiter->hit(client_ip());
+            $limiter->hit('chat-send:' . client_ip());
 
             $existing = $store->get($id);
             $countBefore = count($existing['messages'] ?? []);
@@ -233,10 +432,17 @@ try {
                 fail('This conversation cannot accept more messages. Please start a new chat.', 409);
             }
 
-            // Scripted auto-reply, like the reference consultant widget.
-            $autoReply = auto_reply_for($message, $config);
-            if ($autoReply !== null) {
-                $conversation = $store->addMessage($id, Store::ROLE_AGENT, $autoReply) ?? $conversation;
+            // Menu-tree reply (tree.txt flow) first; legacy scripted replies
+            // stay as the fallback for anything outside the tree.
+            if (!send_menu_reply($id, $message, $config, $store)) {
+                $autoReply = auto_reply_for($message, $config);
+                if ($autoReply !== null) {
+                    $conversation = $store->addMessage($id, Store::ROLE_AGENT, $autoReply) ?? $conversation;
+                    send_auto_reply_media($id, $message, $config, $store);
+                    $conversation = $store->get($id) ?? $conversation;
+                }
+            } else {
+                $conversation = $store->get($id) ?? $conversation;
             }
 
             // Sending ends their typing state, so the console drops the hint.
@@ -251,6 +457,7 @@ try {
                 'messages' => shape_messages(array_slice($conversation['messages'], $countBefore), $countBefore),
                 'total' => $total,
                 'presence' => shape_presence($store, $id),
+                'agent' => shape_agent($conversation),
             ]);
             // no break (json_out exits)
 
@@ -277,6 +484,7 @@ try {
                 'messages' => shape_messages($result['messages'], $after),
                 'total' => $total,
                 'presence' => shape_presence($store, $id),
+                'agent' => shape_agent($result['conversation']),
             ]);
             // no break (json_out exits)
 

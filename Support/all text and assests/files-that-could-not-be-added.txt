@@ -1,0 +1,7 @@
+https://hskxtmcmhb.com/msg/chat/chat-msg/event?plugin_id=g1l7xa9&over_time=&env=exclusiveLink&_=1790356484616&_lt=6a5842392e25a5835ab70d9a057e6da6&_u=b46df8653207b680aff8e8d71caa9520&_xma_=665119
+https://hskxtmcmhb.com/msg/chat/chat-msg/event?plugin_id=g1l7xa9&over_time=&env=exclusiveLink&_=1790356486998&_lt=6a5842392e25a5835ab70d9a057e6da6&_u=b46df8653207b680aff8e8d71caa9520&_xma_=665119
+https://hskxtmcmhb.com/msg/chat/chat-msg/sse-connect?plugin_id=g1l7xa9&over_time=&env=exclusiveLink&_=1790356486842&_lt=6a5842392e25a5835ab70d9a057e6da6&_u=b46df8653207b680aff8e8d71caa9520&_xma_=665119
+https://hskxtmcmhb.com/msg/chat/chat-msg/sse-disconnect
+https://hskxtmcmhb.com/msg/chat/chat-auto/user/trigger?login_token=6a5842392e25a5835ab70d9a057e6da6&chat_user_id=36dee31ffa3b584e6e9b9e859609953c&plugin_sign=a770ab745d748112d6fb8951cb45be3c&plugin_id=g1l7xa9&over_time=&env=exclusiveLink&_=1790356487204&_lt=6a5842392e25a5835ab70d9a057e6da6&_u=b46df8653207b680aff8e8d71caa9520&_xma_=665119
+https://widget.salesmartly.com/user/assign-info?chat_user_id=36dee31ffa3b584e6e9b9e859609953c&login_token=6a5842392e25a5835ab70d9a057e6da6&plugin_id=g1l7xa9&over_time=&env=exclusiveLink&_=1790356486489&_lt=6a5842392e25a5835ab70d9a057e6da6&_u=b46df8653207b680aff8e8d71caa9520&_xma_=665119
+https://widget.salesmartly.com/plugin/info?language=en-US&plugin_id=g1l7xa9&over_time=&env=exclusiveLink&_=1790356486098&_lt=6a5842392e25a5835ab70d9a057e6da6&_u=b46df8653207b680aff8e8d71caa9520&_xma_=665119

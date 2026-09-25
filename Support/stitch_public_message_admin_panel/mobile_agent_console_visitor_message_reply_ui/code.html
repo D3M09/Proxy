@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+
+<html class="h-full bg-slate-100" lang="bn"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/>
+<title>Agent Console - Mobile Live Chat Support</title>
+<!-- Tailwind CSS v3 with Plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              100: '#dbeafe',
+              500: '#2563eb',
+              600: '#1d4ed8',
+              700: '#1e40af'
+            }
+          },
+          fontFamily: {
+            sans: ['Hind Siliguri', 'Inter', 'system-ui', '-apple-system', 'sans-serif'],
+          },
+          boxShadow: {
+            'subtle': '0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05)',
+            'float': '0 8px 30px rgba(0, 0, 0, 0.12)',
+            'top': '0 -4px 16px -1px rgba(0, 0, 0, 0.06)'
+          }
+        }
+      }
+    }
+  </script>
+<!-- Google Fonts for Bengali & Clean Latin typography -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<style data-purpose="custom-scrollbars-and-reset">
+    /* iOS Momentum Scrolling & safe area paddings */
+    body {
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior-y: none;
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .safe-bottom {
+      padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+    }
+    .safe-top {
+      padding-top: max(0.5rem, env(safe-area-inset-top));
+    }
+  </style>
+</head>
+<body class="h-full text-slate-800 antialiased font-sans select-none flex flex-col justify-center items-center bg-slate-900/10">
+<!-- BEGIN: MobileContainer -->
+<!-- Outer wrapper emulating mobile screen frame on desktop view, 100% on actual mobile -->
+<main class="w-full max-w-[430px] h-[100dvh] flex flex-col bg-white shadow-2xl relative overflow-hidden border-x border-slate-200" data-purpose="mobile-agent-console">
+<!-- BEGIN: TopHeader -->
+<header class="bg-white border-b border-slate-200/90 shrink-0 z-20 safe-top shadow-sm" data-purpose="app-navigation-bar">
+<!-- Status & Brand Level -->
+<div class="px-4 py-2.5 flex items-center justify-between">
+<div class="flex items-center space-x-2.5">
+<!-- Brand Avatar / Icon -->
+<div class="relative w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold shadow-sm shadow-blue-500/30">
+<span>B</span>
+<span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white"></span>
+</div>
+<div>
+<div class="flex items-center gap-1.5">
+<h1 class="font-bold text-slate-900 text-sm tracking-tight">Agent Console</h1>
+<span class="inline-flex items-center px-1.5 py-0.2 rounded-full text-[10px] font-semibold bg-red-100 text-red-700">
+                1 unread
+              </span>
+</div>
+<p class="text-[11px] text-slate-500 flex items-center gap-1 font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              অনলাইন (সক্রিয় সাপোর্ট)
+            </p>
+</div>
+</div>
+<!-- Action Icons -->
+<div class="flex items-center space-x-1.5 text-slate-600">
+<button aria-label="Search tickets" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 active:scale-95 transition-transform" type="button">
+<svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+<button aria-label="Queue Drawer" class="w-8 h-8 relative flex items-center justify-center rounded-full hover:bg-slate-100 active:scale-95 transition-transform" id="toggleQueueBtn" type="button">
+<svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="absolute top-1 right-1 w-2 h-2 rounded-full bg-blue-600"></span>
+</button>
+<button aria-label="Settings" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 active:scale-95 transition-transform text-slate-600" type="button">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" stroke-linecap="round" stroke-linejoin="round"></path>
+<path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+</div>
+</div>
+<!-- Quick Filter Carousel / Tabs -->
+<nav aria-label="Ticket filter tabs" class="flex items-center px-3 pb-2 gap-1.5 overflow-x-auto no-scrollbar">
+<button class="px-3 py-1 rounded-full text-xs font-semibold bg-blue-600 text-white shadow-sm shrink-0">
+          All (12)
+        </button>
+<button class="px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200/70 shrink-0">
+          Open (4)
+        </button>
+<button class="px-2.5 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-600 border border-red-200/70 shrink-0 flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+          Unread (1)
+        </button>
+<button class="px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200/70 shrink-0">
+          Resolved
+        </button>
+</nav>
+</header>
+<!-- END: TopHeader -->
+<!-- BEGIN: ActiveTicketBanner -->
+<!-- Current Visitor Info Bar & Quick Controls -->
+<section class="bg-slate-50/90 border-b border-slate-200 px-4 py-2.5 shrink-0 backdrop-blur-sm" data-purpose="ticket-meta-info">
+<div class="flex items-start justify-between gap-2">
+<div class="flex-1 min-w-0">
+<div class="flex items-center gap-2 flex-wrap">
+<span class="font-bold text-slate-900 text-sm truncate">Anonymous visitor</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300/40">
+              Open
+            </span>
+</div>
+<p class="text-[11px] text-slate-500 font-medium truncate mt-0.5">
+            started Sep 25, 17:30 · from <a class="text-blue-600 hover:underline" href="http://localhost:8080/">localhost:8080/</a>
+</p>
+</div>
+<!-- Quick Ticket Actions -->
+<div class="flex items-center gap-1.5 shrink-0">
+<button class="px-2.5 py-1 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 shadow-xs hover:bg-slate-50 active:bg-slate-100" type="button">
+            Close
+          </button>
+<button class="p-1 text-slate-500 hover:text-slate-800 rounded-md border border-transparent hover:border-slate-200" type="button">
+<svg class="w-4 h-4" fill="currentColor" viewbox="0 0 20 20">
+<path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"></path>
+</svg>
+</button>
+</div>
+</div>
+</section>
+<!-- END: ActiveTicketBanner -->
+<!-- BEGIN: ChatThreadScrollArea -->
+<!-- Message History with Original Bengali Content Refined -->
+<section class="flex-1 overflow-y-auto px-3.5 py-3 space-y-3.5 bg-slate-50/50" data-purpose="chat-messages-container" id="chatThread">
+<!-- Date Divider -->
+<div class="flex items-center justify-center my-1">
+<span class="text-[11px] font-medium text-slate-400 bg-slate-200/70 px-2.5 py-0.5 rounded-full">
+          Today · 25 Sep 2026
+        </span>
+</div>
+<!-- Visitor Message 1 (Incoming) -->
+<div class="flex flex-col items-start space-y-1 max-w-[88%]" data-purpose="visitor-message">
+<div class="flex items-center gap-1.5 pl-1">
+<span class="text-[10px] uppercase font-bold tracking-wider text-slate-400">VISITOR</span>
+<span class="text-[10px] text-slate-400">17:30</span>
+</div>
+<div class="bg-white border border-slate-200 text-slate-800 rounded-2xl rounded-tl-sm px-3.5 py-2.5 shadow-sm text-sm leading-relaxed">
+<p class="font-semibold text-slate-900 flex items-center gap-1">
+<span class="text-blue-500">🔷</span> জমা সমস্যা <span class="text-blue-500">🔷</span>
+</p>
+<p class="text-slate-600 text-xs mt-1">
+            আমি bKash দিয়ে টাকা জমা দিয়েছি কিন্তু ব্যালেন্সে যোগ হয়নি।
+          </p>
+</div>
+</div>
+<!-- Agent Message 1 (Outgoing Response from Snapshot) -->
+<div class="flex flex-col items-end space-y-1 ml-auto max-w-[90%]" data-purpose="agent-message">
+<div class="flex items-center gap-1.5 pr-1">
+<span class="text-[10px] uppercase font-bold tracking-wider text-blue-600">AGENT (You)</span>
+<span class="text-[10px] text-slate-400">17:30</span>
+</div>
+<div class="bg-blue-600 text-white rounded-2xl rounded-tr-sm px-3.5 py-2.5 shadow-md shadow-blue-500/10 text-sm leading-relaxed">
+<p class="text-[13.5px] font-normal">
+            আপনার জমা সংক্রান্ত সমস্যার জন্য আমরা দুঃখিত। অনুগ্রহ করে আপনার ইউজার আইডি ও জমার পরিমাণ জানান — যাচাই করে দ্রুত ব্যবস্থা নেওয়া হবে।
+          </p>
+</div>
+<div class="flex items-center space-x-1 text-[11px] text-slate-400 pr-1">
+<span>Sep 25, 17:30</span>
+<span class="text-blue-600 font-bold" title="Seen by visitor">✓✓ Seen</span>
+</div>
+</div>
+<!-- Follow-up Visitor Response (Realistic context simulation) -->
+<div class="flex flex-col items-start space-y-1 max-w-[88%]" data-purpose="visitor-message">
+<div class="flex items-center gap-1.5 pl-1">
+<span class="text-[10px] uppercase font-bold tracking-wider text-slate-400">VISITOR</span>
+<span class="text-[10px] text-slate-400">17:31</span>
+</div>
+<div class="bg-white border border-slate-200 text-slate-800 rounded-2xl rounded-tl-sm px-3.5 py-2.5 shadow-sm text-sm leading-relaxed">
+<p class="text-[13px] text-slate-800">
+            আমার ইউজার আইডি: <strong class="text-slate-900 bg-amber-50 px-1 py-0.5 rounded border border-amber-200">#BK88921</strong> এবং জমার পরিমাণ: <strong>৳ 1,500</strong>
+</p>
+<div class="mt-2 p-2 bg-slate-50 rounded-lg border border-slate-200/80 flex items-center justify-between text-xs text-slate-600">
+<span class="flex items-center gap-1.5 truncate">
+<svg class="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+              TrxID: 9J382LK91A
+            </span>
+<span class="text-blue-600 font-semibold cursor-pointer">View</span>
+</div>
+</div>
+</div>
+<!-- Typing / Real-time status indicator -->
+<div class="flex items-center gap-2 text-xs text-slate-400 pl-1 pt-1">
+<span class="flex space-x-1">
+<span class="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce"></span>
+<span class="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce [animation-delay:0.2s]"></span>
+<span class="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce [animation-delay:0.4s]"></span>
+</span>
+<span class="text-[11px] font-medium text-slate-500">ভিজিটর অপেক্ষা করছেন...</span>
+</div>
+</section>
+<!-- END: ChatThreadScrollArea -->
+<!-- BEGIN: QuickCannedReplies -->
+<!-- Bengali Quick Action Prompts for Fast Agent Replies -->
+<section class="bg-white border-t border-slate-100 px-3 py-1.5 shrink-0" data-purpose="quick-canned-shortcuts">
+<div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar text-xs">
+<span class="text-[11px] font-medium text-slate-400 shrink-0 pl-1">দ্রুত উত্তর:</span>
+<button class="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 font-medium shrink-0 transition-colors border border-slate-200" onclick="insertCannedText('তথ্য যাচাই করা হচ্ছে, ২ মিনিট অপেক্ষা করুন।')" type="button">
+          ⚡ জমা যাচাই
+        </button>
+<button class="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 font-medium shrink-0 transition-colors border border-slate-200" onclick="insertCannedText('অনুগ্রহ করে ট্রানজেকশনের স্ক্রিনশট দিন।')" type="button">
+          📷 স্ক্রিনশট চান
+        </button>
+<button class="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 font-medium shrink-0 transition-colors border border-slate-200" onclick="insertCannedText('আপনার অ্যাকাউন্টে টাকা সফলভাবে যোগ করা হয়েছে।')" type="button">
+          ✅ সমাধান সম্পন্ন
+        </button>
+<button class="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 font-medium shrink-0 transition-colors border border-slate-200" onclick="insertCannedText('আমাদের সাথে যোগাযোগ করার জন্য ধন্যবাদ।')" type="button">
+          🙏 ধন্যবাদ
+        </button>
+</div>
+</section>
+<!-- END: QuickCannedReplies -->
+<!-- BEGIN: BottomReplyDock -->
+<!-- Message Composer Dock with ergonomically placed controls -->
+<footer class="bg-white border-t border-slate-200/90 px-3 pt-2 pb-2 safe-bottom shadow-top shrink-0" data-purpose="reply-composer-area">
+<form class="flex flex-col gap-2" id="replyForm" onsubmit="event.preventDefault(); sendAgentMessage();">
+<div class="relative flex items-end gap-1.5">
+<!-- Attachment Button -->
+<button aria-label="Attach File or Image" class="w-9 h-9 flex items-center justify-center rounded-full text-slate-500 hover:text-blue-600 hover:bg-slate-100 active:scale-95 transition-all shrink-0 mb-0.5" type="button">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.373L8.557 18.315a1.5 1.5 0 11-2.122-2.122L16.25 6.386" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+<!-- Textarea / Input Field -->
+<div class="flex-1 min-w-0 bg-slate-100 rounded-2xl focus-within:ring-2 focus-within:ring-blue-600 focus-within:bg-white border border-transparent focus-within:border-transparent transition-all px-3 py-1.5">
+<textarea class="w-full bg-transparent border-0 p-0 text-slate-800 placeholder-slate-400 text-sm focus:ring-0 resize-none max-h-24 leading-snug no-scrollbar" id="messageInput" placeholder="একটি উত্তর লিখুন... (Write a reply)" rows="1" style="outline: none;"></textarea>
+</div>
+<!-- Send Action Button -->
+<button aria-label="Send Message" class="w-9 h-9 flex items-center justify-center rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/30 active:scale-90 transition-all shrink-0 mb-0.5" type="submit">
+<svg class="w-4 h-4 translate-x-0.5 -rotate-45" fill="currentColor" viewbox="0 0 20 20">
+<path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"></path>
+</svg>
+</button>
+</div>
+<!-- Utility Bar inside Composer -->
+<div class="flex items-center justify-between px-1 text-[11px] text-slate-400">
+<div class="flex items-center gap-2 font-medium">
+<button class="hover:text-slate-600 flex items-center gap-1" type="button">
+<span class="text-xs">⚡</span> Canned replies
+            </button>
+<span>•</span>
+<span class="text-slate-400">Ctrl+Enter to send</span>
+</div>
+<span class="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Connected
+          </span>
+</div>
+</form>
+</footer>
+<!-- END: BottomReplyDock -->
+<!-- BEGIN: VisitorQueueDrawer -->
+<!-- Sliding Bottom / Queue Sheet to quickly switch between incoming tickets -->
+<div class="absolute inset-x-0 bottom-0 bg-white rounded-t-2xl shadow-float border-t border-slate-200 transform translate-y-full transition-transform duration-300 ease-in-out z-30 flex flex-col max-h-[70%]" data-purpose="incoming-queue-drawer" id="queueDrawer">
+<!-- Drawer Handle & Header -->
+<div class="p-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/70 rounded-t-2xl">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+<h2 class="font-bold text-slate-800 text-sm">ইনকামিং কিউ (Visitor Queues)</h2>
+<span class="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">3 waiting</span>
+</div>
+<button class="text-slate-400 hover:text-slate-600 p-1 rounded-full" id="closeDrawerBtn" type="button">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+</div>
+<!-- Drawer Ticket List -->
+<div class="overflow-y-auto p-2 space-y-1.5 no-scrollbar">
+<!-- Active conversation item -->
+<article class="p-2.5 rounded-xl bg-blue-50/70 border border-blue-200 cursor-pointer flex items-start justify-between">
+<div class="space-y-0.5">
+<div class="flex items-center gap-2">
+<span class="text-xs font-bold text-blue-900">Anonymous visitor (Active)</span>
+<span class="text-[10px] px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 font-semibold">Open</span>
+</div>
+<p class="text-xs text-slate-600 truncate max-w-[220px]">🔷 জমা সমস্যা 🔷 আমি bKash দিয়ে...</p>
+</div>
+<span class="text-[10px] text-slate-400 font-medium">just now</span>
+</article>
+<!-- Waiting ticket 2 -->
+<article class="p-2.5 rounded-xl hover:bg-slate-50 border border-slate-200/70 cursor-pointer flex items-start justify-between transition-colors">
+<div class="space-y-0.5">
+<div class="flex items-center gap-2">
+<span class="text-xs font-bold text-slate-800">User_4891</span>
+<span class="text-[10px] px-1.5 py-0.2 rounded bg-red-100 text-red-700 font-bold">1 new</span>
+</div>
+<p class="text-xs text-slate-500 truncate max-w-[220px]">উইথড্র সমস্যা হচ্ছে, টাকা আসছে না</p>
+</div>
+<span class="text-[10px] text-slate-400 font-medium">2m ago</span>
+</article>
+<!-- Waiting ticket 3 -->
+<article class="p-2.5 rounded-xl hover:bg-slate-50 border border-slate-200/70 cursor-pointer flex items-start justify-between transition-colors">
+<div class="space-y-0.5">
+<div class="flex items-center gap-2">
+<span class="text-xs font-bold text-slate-800">Anonymous #8092</span>
+<span class="text-[10px] px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 font-semibold">Pending</span>
+</div>
+<p class="text-xs text-slate-500 truncate max-w-[220px]">পেমেন্ট গেটওয়ে এরর দেখাচ্ছে</p>
+</div>
+<span class="text-[10px] text-slate-400 font-medium">14m ago</span>
+</article>
+</div>
+</div>
+<!-- END: VisitorQueueDrawer -->
+</main>
+<!-- END: MobileContainer -->
+<!-- BEGIN: InteractiveHandlers -->
+<script data-purpose="mobile-interaction-logic">
+    // Drawer Slide Toggle
+    const toggleQueueBtn = document.getElementById('toggleQueueBtn');
+    const closeDrawerBtn = document.getElementById('closeDrawerBtn');
+    const queueDrawer = document.getElementById('queueDrawer');
+    const messageInput = document.getElementById('messageInput');
+    const chatThread = document.getElementById('chatThread');
+
+    function openDrawer() {
+      queueDrawer.classList.remove('translate-y-full');
+      queueDrawer.classList.add('translate-y-0');
+    }
+
+    function closeDrawer() {
+      queueDrawer.classList.remove('translate-y-0');
+      queueDrawer.classList.add('translate-y-full');
+    }
+
+    if (toggleQueueBtn && queueDrawer) {
+      toggleQueueBtn.addEventListener('click', openDrawer);
+      closeDrawerBtn.addEventListener('click', closeDrawer);
+    }
+
+    // Insert Predefined Canned Responses
+    function insertCannedText(text) {
+      if (messageInput) {
+        messageInput.value = text;
+        messageInput.focus();
+      }
+    }
+
+    // Agent Send Message Functionality
+    function sendAgentMessage() {
+      const text = messageInput.value.trim();
+      if (!text) return;
+
+      const now = new Date();
+      const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      // Build New Agent Bubble
+      const messageWrapper = document.createElement('div');
+      messageWrapper.className = 'flex flex-col items-end space-y-1 ml-auto max-w-[90%] transition-opacity duration-300';
+      messageWrapper.setAttribute('data-purpose', 'agent-message');
+      
+      messageWrapper.innerHTML = `
+        <div class="flex items-center gap-1.5 pr-1">
+          <span class="text-[10px] uppercase font-bold tracking-wider text-blue-600">AGENT (You)</span>
+          <span class="text-[10px] text-slate-400">${timeString}</span>
+        </div>
+        <div class="bg-blue-600 text-white rounded-2xl rounded-tr-sm px-3.5 py-2.5 shadow-md shadow-blue-500/10 text-sm leading-relaxed">
+          <p class="text-[13.5px] font-normal leading-snug">${escapeHTML(text)}</p>
+        </div>
+        <div class="flex items-center space-x-1 text-[11px] text-slate-400 pr-1">
+          <span>Just now</span>
+          <span class="text-slate-400">✓ Sent</span>
+        </div>
+      `;
+
+      chatThread.appendChild(messageWrapper);
+      messageInput.value = '';
+      
+      // Auto-scroll chat thread to bottom
+      chatThread.scrollTo({
+        top: chatThread.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+
+    // Simple HTML escape for chat simulation safety
+    function escapeHTML(str) {
+      const p = document.createElement('p');
+      p.appendChild(document.createTextNode(str));
+      return p.innerHTML;
+    }
+
+    // Auto-expand textarea slightly on typing
+    if (messageInput) {
+      messageInput.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = Math.min(this.scrollHeight, 96) + 'px';
+      });
+
+      // Submit on Ctrl+Enter
+      messageInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          sendAgentMessage();
+        }
+      });
+    }
+  </script>
+<!-- END: InteractiveHandlers -->
+</body></html>

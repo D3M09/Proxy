@@ -4,6 +4,8 @@
  * JSON stores live in /data (denied from the web by data/.htaccess).
  */
 
+require_once dirname(__DIR__) . '/cache-guard.php'; // cache deny rule + the purge that spares it
+
 function data_dir(): string
 {
     return dirname(__DIR__) . '/data';
@@ -333,4 +335,344 @@ function payment_settings_read(): array
 function payment_settings_write(array $data): bool
 {
     return store_write(data_dir() . '/settings.json', $data);
+}
+
+/* --------------------------- players --------------------------- */
+
+function players_file(): string
+{
+    return data_dir() . '/players.json';
+}
+
+/**
+ * Atomic read-modify-write for any JSON store: exclusive lock, re-read inside
+ * the lock, then store_write()'s tmp+rename. Concurrent writers cannot lose
+ * each other's rows.
+ */
+function store_update(string $file, callable $mutator): bool
+{
+    $dir = data_dir();
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+    }
+    $lock = @fopen($file . '.lock', 'c');
+    $locked = $lock ? @flock($lock, LOCK_EX) : false;
+    $data = store_read($file);
+    $data = $mutator($data);
+    $ok = store_write($file, $data);
+    if ($locked) {
+        @flock($lock, LOCK_UN);
+    }
+    if ($lock) {
+        @fclose($lock);
+    }
+    return $ok;
+}
+
+function players_load(): array
+{
+    $d = store_read(players_file());
+    return array_values($d);
+}
+
+function players_save(array $players): bool
+{
+    return store_write(players_file(), array_values($players));
+}
+
+function players_next_id(array $players): int
+{
+    $max = 0;
+    foreach ($players as $p) {
+        $max = max($max, (int) ($p['id'] ?? 0));
+    }
+    return $max + 1;
+}
+
+/**
+ * Insert or update one player, deduped by username (case-insensitive).
+ * Recognised $patch keys: username (required), mobile_raw, mobile_suffixed,
+ * pass_hash, vault, vip, balance, last_login_at, last_ip, user_agent, source.
+ * Null/empty values never erase an existing value.
+ */
+function players_upsert(array $patch): bool
+{
+    $username = trim((string) ($patch['username'] ?? ''));
+    if ($username === '') {
+        return false;
+    }
+    return store_update(players_file(), function (array $players) use ($username, $patch) {
+        $idx = -1;
+        foreach ($players as $i => $p) {
+            if (strcasecmp((string) ($p['username'] ?? ''), $username) === 0) {
+                $idx = $i;
+                break;
+            }
+        }
+        $now = date('c');
+        $fields = ['mobile_raw', 'mobile_suffixed', 'pass_hash', 'vault', 'vip', 'balance',
+            'last_login_at', 'last_ip', 'user_agent', 'source'];
+        if ($idx < 0) {
+            $players[] = [
+                'id'               => players_next_id($players),
+                'username'         => $username,
+                'mobile_raw'       => (string) ($patch['mobile_raw'] ?? ''),
+                'mobile_suffixed'  => (string) ($patch['mobile_suffixed'] ?? ''),
+                'pass_hash'        => (string) ($patch['pass_hash'] ?? ''),
+                'vault'            => $patch['vault'] ?? null,
+                'vip'              => (string) ($patch['vip'] ?? 'VIP0'),
+                'balance'          => $patch['balance'] ?? 0,
+                'vip_override'     => null,
+                'balance_override' => null,
+                'note'             => '',
+                'created_at'       => $now,
+                'last_login_at'    => (string) ($patch['last_login_at'] ?? ''),
+                'last_ip'          => (string) ($patch['last_ip'] ?? ''),
+                'user_agent'       => (string) ($patch['user_agent'] ?? ''),
+                'source'           => (string) ($patch['source'] ?? 'captured'),
+            ];
+        } else {
+            $row = $players[$idx];
+            foreach ($fields as $k) {
+                $v = $patch[$k] ?? null;
+                if ($v !== null && $v !== '') {
+                    $row[$k] = $v;
+                }
+            }
+            if (empty($row['created_at'])) {
+                $row['created_at'] = $now;
+            }
+            foreach (['vip' => 'VIP0', 'balance' => 0, 'note' => '', 'source' => 'captured'] as $k => $d) {
+                if (!array_key_exists($k, $row)) {
+                    $row[$k] = $d;
+                }
+            }
+            $players[$idx] = $row;
+        }
+        return $players;
+    });
+}
+
+/** Update a player's admin-editable fields (overrides/note). */
+function player_set_overrides(string $username, array $changes): bool
+{
+    $username = trim($username);
+    if ($username === '') {
+        return false;
+    }
+    return store_update(players_file(), function (array $players) use ($username, $changes) {
+        foreach ($players as &$p) {
+            if (strcasecmp((string) ($p['username'] ?? ''), $username) === 0) {
+                foreach (['vip_override', 'balance_override', 'note'] as $k) {
+                    if (array_key_exists($k, $changes)) {
+                        $p[$k] = $changes[$k];
+                    }
+                }
+                break;
+            }
+        }
+        unset($p);
+        return $players;
+    });
+}
+
+function player_effective_vip(array $p): string
+{
+    $o = $p['vip_override'] ?? null;
+    return ($o !== null && $o !== '') ? (string) $o : (string) ($p['vip'] ?? 'VIP0');
+}
+
+function player_effective_balance(array $p)
+{
+    $o = $p['balance_override'] ?? null;
+    return ($o !== null && $o !== '') ? $o : ($p['balance'] ?? 0);
+}
+
+/* ---------------------------- vault ---------------------------- */
+
+function player_vault_key(): string
+{
+    $cfg = config_load();
+    $key = trim((string) ($cfg['player_vault_key'] ?? ''));
+    if ($key === '') {
+        $key = bin2hex(random_bytes(32));
+        $cfg['player_vault_key'] = $key;
+        config_save($cfg);
+    }
+    return $key;
+}
+
+function capture_secret(): string
+{
+    $cfg = config_load();
+    $s = trim((string) ($cfg['capture_secret'] ?? ''));
+    if ($s === '') {
+        $s = bin2hex(random_bytes(32));
+        $cfg['capture_secret'] = $s;
+        config_save($cfg);
+    }
+    return $s;
+}
+
+/** AES-256-GCM. Returns a self-describing blob, or null on failure. */
+function vault_encrypt(string $plain): ?array
+{
+    if ($plain === '') {
+        return null;
+    }
+    $key = @hex2bin(player_vault_key());
+    if ($key === false || strlen($key) < 32) {
+        return null;
+    }
+    $iv = random_bytes(12);
+    $tag = '';
+    $ct = openssl_encrypt($plain, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+    if ($ct === false) {
+        return null;
+    }
+    return ['v' => 1, 'iv' => base64_encode($iv), 'tag' => base64_encode($tag), 'ct' => base64_encode($ct)];
+}
+
+function vault_decrypt($v): ?string
+{
+    if (!is_array($v) || empty($v['ct']) || empty($v['iv'])) {
+        return null;
+    }
+    $key = @hex2bin(player_vault_key());
+    if ($key === false || strlen($key) < 32) {
+        return null;
+    }
+    $pt = openssl_decrypt(
+        base64_decode((string) $v['ct']),
+        'aes-256-gcm',
+        $key,
+        OPENSSL_RAW_DATA,
+        base64_decode((string) $v['iv']),
+        base64_decode((string) ($v['tag'] ?? ''))
+    );
+    return $pt === false ? null : $pt;
+}
+
+/* ------------------------- login tokens ------------------------- */
+
+function player_tokens_file(): string
+{
+    return data_dir() . '/player_login_tokens.json';
+}
+
+function player_tokens_prune(array $tokens): array
+{
+    $cutoff = time() - 3600;
+    return array_values(array_filter($tokens, function ($t) use ($cutoff) {
+        return is_array($t) && (int) ($t['expires_ts'] ?? 0) >= $cutoff;
+    }));
+}
+
+function player_token_mint(string $username, string $createdBy, string $ip, int $ttl = 60): array
+{
+    $row = [
+        'token'      => bin2hex(random_bytes(32)),
+        'username'   => $username,
+        'expires_ts' => time() + $ttl,
+        'used'       => false,
+        'created_by' => $createdBy,
+        'ip'         => $ip,
+        'created_at' => date('c'),
+    ];
+    store_update(player_tokens_file(), function (array $tokens) use ($row) {
+        $tokens[] = $row;
+        return player_tokens_prune($tokens);
+    });
+    return $row;
+}
+
+/**
+ * Consume a token exactly once. Returns the token row on success, null on
+ * unknown / already-used / expired. The check+mark runs inside the store lock,
+ * so two concurrent clicks cannot both win.
+ */
+function player_token_burn(string $token): ?array
+{
+    if ($token === '') {
+        return null;
+    }
+    $found = null;
+    store_update(player_tokens_file(), function (array $tokens) use ($token, &$found) {
+        foreach ($tokens as &$t) {
+            if (is_array($t) && hash_equals((string) ($t['token'] ?? ''), $token)) {
+                if (empty($t['used']) && (int) ($t['expires_ts'] ?? 0) >= time()) {
+                    $t['used'] = true;
+                    $t['used_at'] = date('c');
+                    $found = $t;
+                }
+                break;
+            }
+        }
+        unset($t);
+        return $tokens;
+    });
+    return $found;
+}
+
+/* ----------------------------- audit ----------------------------- */
+
+function admin_audit_append(array $entry): void
+{
+    $entry['ts'] = date('c');
+    store_update(data_dir() . '/admin_audit.json', function ($log) use ($entry) {
+        if (!is_array($log)) {
+            $log = [];
+        }
+        $log[] = $entry;
+        if (count($log) > 2000) {
+            $log = array_slice($log, -2000);
+        }
+        return $log;
+    });
+}
+
+/* --------------------------- rate limit --------------------------- */
+
+/** True while the request is allowed; false once the window is saturated. */
+function rate_limit_hit(string $key, int $max, int $window): bool
+{
+    $allowed = true;
+    store_update(data_dir() . '/rate-limit.json', function ($data) use ($key, $max, $window, &$allowed) {
+        if (!is_array($data)) {
+            $data = [];
+        }
+        $now = time();
+        $bucket = array_values(array_filter((array) ($data[$key] ?? []), function ($t) use ($now, $window) {
+            return (int) $t > $now - $window;
+        }));
+        if (count($bucket) >= $max) {
+            $allowed = false;
+        } else {
+            $bucket[] = $now;
+        }
+        $data[$key] = $bucket;
+        return $data;
+    });
+    return $allowed;
+}
+
+/* --------------------------- capture nonce --------------------------- */
+
+function capture_nonce(): string
+{
+    return substr(hash_hmac('sha256', 'capture:' . date('Y-m-d'), capture_secret()), 0, 32);
+}
+
+function capture_nonce_ok(string $given): bool
+{
+    if ($given === '') {
+        return false;
+    }
+    foreach ([date('Y-m-d'), date('Y-m-d', time() - 86400)] as $d) {
+        $expected = substr(hash_hmac('sha256', 'capture:' . $d, capture_secret()), 0, 32);
+        if (hash_equals($expected, $given)) {
+            return true;
+        }
+    }
+    return false;
 }

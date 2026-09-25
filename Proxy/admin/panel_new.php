@@ -91,20 +91,10 @@ function admin_dir_size(string $dir): array
 
 function admin_purge_cache(string $dir): int
 {
-    $n = 0;
-    if (!is_dir($dir)) {
-        return 0;
-    }
-    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
-    foreach ($it as $f) {
-        if ($f->isFile()) {
-            @unlink($f->getPathname());
-            $n++;
-        } elseif ($f->isDir()) {
-            @rmdir($f->getPathname());
-        }
-    }
-    return $n;
+    // Deleting cached files is fine; deleting the deny rule that keeps the cache
+    // from being served directly is not. The shared purge skips dotfiles and
+    // rewrites the guard if it ever went missing.
+    return cachePurgeContents($dir);
 }
 
 function admin_icon(string $name): string

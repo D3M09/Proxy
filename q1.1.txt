@@ -1,0 +1,30 @@
+Q1.1: pass_hash can't replay the encrypted upstream login. Which impersonation mechanism for Feature 4?
+
+Options considered:
+A) Snapshot browser session, encrypted at rest
+B) Vault the password + drive the real login form
+C) Replay captured encrypted login request
+
+Verdict: Pick B — vault password + drive real login form. Don't build A or C as primary.
+
+Why not C (replay):
+- res/encrypt.js is RSA-wrapped AES with random padding/nonce per request. Replaying the same ciphertext + Encryption header (Proxy/index.php:fetchFromUpstream forwards it opaque) will be rejected as replay / stale timestamp.
+- Handing Set-Cookie / Authorization to a different browser is fragile across HttpOnly / Secure / SameSite.
+
+Why not A (snapshot) as primary:
+- JS can snapshot localStorage/sessionStorage, but not HttpOnly cookies, which a betting upstream almost certainly uses.
+- Proxy/index.php sees Set-Cookie server-side but can't map it to a username because the login body is ciphertext — would need timing-correlation hacks.
+- Snapshots go stale in hours; admin clicks later = dead session.
+- Token-at-rest is just as sensitive as a vaulted password, so no security win.
+
+Why B:
+- You already capture plaintext pre-encryption for Features 1b/2. Reusing it through the app's own login form means the app's crypto mints a fresh session — immune to RSA/AES rotation, nonce, key changes.
+- Most reliable long-lived one-click login.
+
+Implement B as:
+1. Collector POST /api/players-collect.php: receives {username_suffixed, mobile_raw, password} from the pre-encrypt shim. PHP validates, stores pass_hash=password_hash() in players.json + vault=openssl_encrypt(AES-256-GCM) with player_vault_key in Proxy/config.php. Never accept vip/balance from client. Never log plaintext.
+2. Admin Login -> POST + CSRF, rate-limit 10/min, audit to admin_audit.json, mint single-use token in player_login_tokens.json (random_bytes(32), 60s expiry).
+3. GET /player-login?token= (router.php + Proxy/index.php, isAuthTraffic=true, no-store): burn token, decrypt vault in memory only, render one-time page that fills the genuine username/password inputs, dispatches input/change, clicks submit, redirects to /m/home. Password never in URL, never displayed, cleared after. Fallback: Copy login ID button.
+4. Keep applyRegisterRules() server-side; everything else client-side in injectCombinedShims().
+
+Residual risk to accept: admin browser briefly holds plaintext in DOM memory (unavoidable for form-drive). Mitigate with immediate redirect + no console logging.

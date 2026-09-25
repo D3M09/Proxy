@@ -8,7 +8,7 @@ CGIPassAuth On
 SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
 
 # Admin internals must never be fetched directly.
-<FilesMatch "^(config|panel)\.php$">
+<FilesMatch "^(config|panel|cache-guard)\.php$">
     <IfModule mod_authz_core.c>
         Require all denied
     </IfModule>
@@ -59,6 +59,13 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
 
     # Static VoucherCenter page (with or without trailing slash)
     RewriteRule ^VoucherCenter/?$ VoucherCenter/index.html [L]
+
+    # The cache directory is never fetched over HTTP, whatever else is on disk:
+    # cached bytes must go out through index.php so they get rewritten, and the
+    # per-session subdirectories hold one visitor's data. Layer one of two - the
+    # other is cache/.htaccess, which says the same thing to servers that never
+    # read this file.
+    RewriteRule ^cache/ - [F,L]
 
     # Serve real files/directories as-is
     RewriteCond %{REQUEST_FILENAME} -f [OR]

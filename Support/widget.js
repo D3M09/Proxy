@@ -9,10 +9,12 @@
  *
  * Optional data-* attributes on the script tag:
  *   data-support-url    base URL of the support center (defaults to script origin)
- *   data-title          header brand, e.g. "1333betws"
- *   data-subtitle       small line under the brand
- *   data-notice         scrolling notice under the header (empty = hidden)
- *   data-greeting       first bubble shown in an empty thread
+  *   data-title          header brand, e.g. "BBC99.bet"
+  *   data-subtitle       small line under the brand
+  *   data-notice         scrolling notice under the header (empty = hidden)
+  *   data-greeting       first bubble shown in an empty thread
+  *   data-avatar         image URL for the header + agent bubbles
+  *                       (defaults to <support-url>/assets/images/support.svg)
  *   data-quick-replies  JSON array of quick-reply button labels
  *   data-color          accent colour
  *   data-position       "right" (default) or "left" *   data-poll          polling interval in ms
@@ -70,10 +72,11 @@
 
   var config = {
     api: base + '/api.php',
-    title: attr('title', 'Online Consultant'),
+    title: attr('title', 'BBC99.bet'),
     subtitle: attr('subtitle', ''),
     notice: attr('notice', ''),
     greeting: attr('greeting', 'Hi! How can we help you today?'),
+    avatar: attr('avatar', base ? base + '/assets/images/support.svg' : 'assets/images/support.svg'),
     quickReplies: parseList(attr('quick-replies', '')),
     color: attr('color', '#1762f6'),
     position: attr('position', 'right') === 'left' ? 'left' : 'right',
@@ -92,6 +95,45 @@
   }
 
   var brandInitial = (config.title || '?').trim().charAt(0).toUpperCase();
+
+  // Public avatar image (assets/images/support.svg by default). Only http(s),
+  // root/relative URLs and data:image are accepted — anything else falls back
+  // to the brand initial so a data-avatar attribute cannot inject script.
+  function safeAvatarUrl(url) {
+    if (!url || typeof url !== 'string') {
+      return '';
+    }
+    var value = url.trim();
+    if (/^(https?:\/\/|\/)/i.test(value)) {
+      return /^javascript:/i.test(value) ? '' : value;
+    }
+    if (/^data:image\//i.test(value)) {
+      return value;
+    }
+    if (/^[a-z0-9_\-\/.]+\.(svg|png|jpe?g|gif|webp)(\?.*)?$/i.test(value)) {
+      return value;
+    }
+    return '';
+  }
+
+  var avatarUrl = safeAvatarUrl(config.avatar);
+
+  /** Fill an avatar circle with the image, falling back to the initial. */
+  function fillAvatar(span) {
+    span.textContent = '';
+    if (avatarUrl) {
+      var img = document.createElement('img');
+      img.src = avatarUrl;
+      img.alt = '';
+      img.setAttribute('aria-hidden', 'true');
+      img.addEventListener('error', function () {
+        span.textContent = brandInitial;
+      });
+      span.appendChild(img);
+    } else {
+      span.textContent = brandInitial;
+    }
+  }
 
   var state = {
     id: null,
@@ -161,7 +203,8 @@
     // header
     '.sc-head{display:flex;align-items:center;gap:10px;padding:12px 14px;background:#fff;border-bottom:1px solid #e5e6eb}',
     '.sc-avatar{width:38px;height:38px;border-radius:50%;background:var(--sc-accent);color:#fff;flex:0 0 auto;',
-    'display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700}',
+    'display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;overflow:hidden;flex-shrink:0}',
+    '.sc-avatar img{width:100%;height:100%;object-fit:cover;display:block;border-radius:50%}',
     '.sc-head-text{flex:1;min-width:0}',
     '.sc-head strong{display:block;font-size:16px;font-weight:600;color:#1d2129;overflow:hidden;',
     'text-overflow:ellipsis;white-space:nowrap}',
@@ -185,7 +228,8 @@
     '.sc-row{display:flex;gap:8px;align-items:flex-end;margin:0 0 12px}',
     '.sc-row.sc-visitor{flex-direction:row-reverse}',
     '.sc-bubble-avatar{width:28px;height:28px;border-radius:50%;background:var(--sc-accent);color:#fff;flex:0 0 auto;',
-    'display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}',
+    'display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;overflow:hidden;flex-shrink:0}',
+    '.sc-bubble-avatar img{width:100%;height:100%;object-fit:cover;display:block;border-radius:50%}',
     '.sc-msg{max-width:80%;padding:9px 12px;border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;',
     'background:#fff;border:1px solid #e5e6eb;color:#1d2129;font-size:13.5px}',
     '.sc-row.sc-visitor .sc-msg{background:var(--sc-accent);border-color:transparent;color:#fff}',
@@ -202,6 +246,7 @@
     'padding:9px 10px;font:inherit;font-size:13px;color:#1d2129;cursor:pointer;text-align:center;',
     'transition:border-color .15s ease,color .15s ease,background .15s ease}',
     '.sc-quick button:hover{border-color:var(--sc-accent);color:var(--sc-accent);background:#f5f8ff}',
+    '.sc-quick button:disabled{opacity:.55;cursor:default}',
 
     // form + composer
     '.sc-composer textarea{width:100%;padding:9px 11px;border:1px solid #e5e6eb;border-radius:8px;',
@@ -285,7 +330,7 @@
   root.innerHTML = [
     '<div class="sc-panel' + (pageMode ? ' sc-open' : '') + '" role="dialog" aria-label="' + escapeAttr(config.title) + '" aria-modal="false">',
     '<div class="sc-head">',
-    '<span class="sc-avatar" aria-hidden="true">' + escapeAttr(brandInitial) + '</span>',
+    '<span class="sc-avatar" aria-hidden="true"></span>',
     '<div class="sc-head-text"><strong></strong><span></span></div>',
     '<button type="button" class="sc-close" aria-label="Close chat">&times;</button>',
     '</div>',
@@ -303,8 +348,8 @@
 
   el.panel = root.querySelector('.sc-panel');
   el.body = root.querySelector('.sc-body');
-  el.headTitle = root.querySelector('.sc-head strong');
-  el.headSubtitle = root.querySelector('.sc-head span');
+  el.headTitle = root.querySelector('.sc-head-text strong');
+  el.headSubtitle = root.querySelector('.sc-head-text span');
   el.close = root.querySelector('.sc-close');
   el.notice = root.querySelector('.sc-notice');
   el.noticeTrack = root.querySelector('.sc-notice-track');
@@ -312,6 +357,7 @@
   el.badge = root.querySelector('.sc-badge');
   el.hint = root.querySelector('.sc-hint');
 
+  fillAvatar(root.querySelector('.sc-avatar'));
   el.headTitle.textContent = config.title;
   if (config.subtitle) {
     el.headSubtitle.textContent = config.subtitle;
@@ -390,7 +436,7 @@
     return wrap;
   }
 
-  function addBubble(role, text, at, file, index) {
+  function addBubble(role, text, at, file, index, menu) {
     showWelcome(false);
     var agent = role === 'agent';
 
@@ -404,7 +450,7 @@
       var avatar = document.createElement('span');
       avatar.className = 'sc-bubble-avatar';
       avatar.setAttribute('aria-hidden', 'true');
-      avatar.textContent = brandInitial;
+      fillAvatar(avatar);
       row.appendChild(avatar);
     }
 
@@ -427,6 +473,36 @@
     }
     row.appendChild(bubble);
     el.body.appendChild(row);
+    if (agent && Array.isArray(menu) && menu.length) {
+      addMenuOptions(menu);
+    }
+    el.body.scrollTop = el.body.scrollHeight;
+  }
+
+  /**
+   * Tappable follow-up options under an agent message (menu-tree flow from
+   * tree.txt). Tapping sends the label like a quick reply; the group locks
+   * after one tap so a double click cannot send twice.
+   */
+  function addMenuOptions(options) {
+    var labels = options.filter(function (label) { return typeof label === 'string' && label !== ''; });
+    if (!labels.length) {
+      return;
+    }
+    var group = document.createElement('div');
+    group.className = 'sc-quick';
+    labels.forEach(function (label) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.addEventListener('click', function () {
+        var btns = group.querySelectorAll('button');
+        Array.prototype.forEach.call(btns, function (b) { b.disabled = true; });
+        pickQuickReply(label);
+      });
+      group.appendChild(button);
+    });
+    el.body.appendChild(group);
     el.body.scrollTop = el.body.scrollHeight;
   }
 
@@ -687,7 +763,7 @@
         var avatar = document.createElement('span');
         avatar.className = 'sc-bubble-avatar';
         avatar.setAttribute('aria-hidden', 'true');
-        avatar.textContent = brandInitial;
+        fillAvatar(avatar);
 
         var dots = document.createElement('span');
         dots.className = 'sc-typing-dots';
@@ -749,7 +825,7 @@
   /** Append messages from an API response and advance the cursor. */
   function ingest(data) {
     (data.messages || []).forEach(function (message) {
-      addBubble(message.role, message.text, message.at, message.file, message.index);
+      addBubble(message.role, message.text, message.at, message.file, message.index, message.menu);
       if (message.role === 'agent' && !state.open) {
         setUnread(state.unread + 1);
       }

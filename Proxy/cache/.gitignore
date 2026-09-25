@@ -1,0 +1,6 @@
+# Runtime cache state: sessions, fill locks, health snapshots and freshly fetched
+# upstream assets. It is per-machine, not source. Tracked files stay tracked; this
+# only stops the churn from showing up as untracked noise.
+*
+!.gitignore
+!.htaccess

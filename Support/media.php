@@ -70,6 +70,11 @@ header('Content-Type: ' . $mime);
 header('X-Content-Type-Options: nosniff');
 header('Content-Disposition: inline; filename="' . $filename . '"');
 header('Cache-Control: private, max-age=86400');
+header('Referrer-Policy: no-referrer');
+header('X-Frame-Options: DENY');
+// The widget loads these bytes even when it is embedded on another site, so
+// state that explicitly rather than relying on the browser's default.
+header('Cross-Origin-Resource-Policy: cross-origin');
 header('Last-Modified: ' . gmdate('D, d M Y H:i:s', (int) (filemtime($path) ?: time())) . ' GMT');
 
 // ---------------------------------------------------------------------------

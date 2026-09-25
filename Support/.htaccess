@@ -1,0 +1,41 @@
+# Apache hardening, layered on top of data/.htaccess.
+#
+# .htaccess is not honoured by every server (the built-in dev server ignores it
+# entirely — see router.php, and nginx needs the snippet in the README). When it
+# *is* honoured, this denies the same things router.php denies.
+#
+# Every directive here is wrapped in <IfModule> so a host that lacks the module
+# ignores it instead of returning 500. For the same reason there is no
+# "Options -Indexes": an unpermitted directive can break a site whose
+# AllowOverride does not cover it, and directory listings are a minor issue
+# compared with a dead site.
+
+<IfModule mod_alias.c>
+    # Runtime data, shared libraries and config are not web content. These are
+    # deliberately unanchored: the app may sit at the document root or in a
+    # subdirectory such as /Support/, and RedirectMatch answers 404 whether or
+    # not the path exists, so it cannot be used to probe for files.
+    RedirectMatch 404 /(?:data|lib)(?:/|$)
+    RedirectMatch 404 (?:^|/)config\.php$
+    RedirectMatch 404 /\.
+</IfModule>
+
+# Baseline hardening headers for static files. PHP responses set their own.
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy "no-referrer"
+    Header always set X-Frame-Options "DENY"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+</IfModule>
+
+# Defence in depth: if PHP ever stopped handling .php, these must not become
+# readable source. Conversation files are .json, so they are covered twice.
+<FilesMatch "\.(json|md|log|lock|sqlite|bak|ini|yml|yaml)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>

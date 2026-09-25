@@ -3,4 +3,5 @@
 /data/uploads/
 /data/presence/
 /data/admin.json
+/data/agents.json
 /data/throttle.json

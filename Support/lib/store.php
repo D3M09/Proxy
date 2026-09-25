@@ -65,9 +65,12 @@ final class Store
 
     /**
      * @param array{token:string,mime:string,name:string,size:int}|null $file
+     * @param array{ip?:string,ua?:string}|null $meta Visitor IP/User-Agent, shown
+     *        in the console's visitor panel. Optional, so old callers keep working
+     *        and old conversation files (which have no "visitor" key) still load.
      * @return string The new conversation id.
      */
-    public function create(string $name, string $email, string $text, string $page = '', ?array $file = null): string
+    public function create(string $name, string $email, string $text, string $page = '', ?array $file = null, ?array $meta = null): string
     {
         $id = bin2hex(random_bytes(16));
         $now = time();
@@ -84,6 +87,12 @@ final class Store
             'visitor_unread' => 0,
             'messages' => [],
         ];
+
+        $ip = $this->clean((string) ($meta['ip'] ?? ''), 45);
+        $ua = $this->clean((string) ($meta['ua'] ?? ''), 255);
+        if ($ip !== '' || $ua !== '') {
+            $conversation['visitor'] = ['ip' => $ip, 'ua' => $ua];
+        }
 
         $conversation['messages'][] = $this->message(self::ROLE_VISITOR, $text, $now, $file);
         $conversation['agent_unread'] = 1;
@@ -145,25 +154,32 @@ final class Store
 
     /**
      * Append a message. Text may be empty when an attachment carries the message.
+     * $menu is a list of follow-up option labels (menu-tree buttons) shown
+     * under an agent message; it is inert data for the admin console.
      *
      * @param array{token:string,mime:string,name:string,size:int}|null $file
+     * @param list<string>|null $menu
      * @return array<string,mixed>|null Updated conversation, or null when missing/full/invalid.
      */
-    public function addMessage(string $id, string $role, string $text, ?array $file = null): ?array
+    public function addMessage(string $id, string $role, string $text, ?array $file = null, ?array $menu = null): ?array
     {
         if ($role !== self::ROLE_VISITOR && $role !== self::ROLE_AGENT) {
             return null;
         }
         $text = $this->clean($text, $this->maxTextLength);
-        if ($text === '' && $file === null) {
+        $menu = $menu === null ? null : array_values(array_filter($menu, static fn ($v): bool => is_string($v) && trim($v) !== ''));
+        if ($menu === []) {
+            $menu = null;
+        }
+        if ($text === '' && $file === null && $menu === null) {
             return null;
         }
 
-        return $this->mutate($id, function (array &$c) use ($role, $text, $file): bool {
+        return $this->mutate($id, function (array &$c) use ($role, $text, $file, $menu): bool {
             if (count($c['messages'] ?? []) >= $this->maxMessages) {
                 return false;
             }
-            $c['messages'][] = $this->message($role, $text, time(), $file);
+            $c['messages'][] = $this->message($role, $text, time(), $file, $menu);
             if ($role === self::ROLE_AGENT) {
                 $c['visitor_unread'] = ($c['visitor_unread'] ?? 0) + 1;
                 // An agent actively replying reopens a closed conversation.
@@ -176,6 +192,43 @@ final class Store
             }
             return true;
         });
+    }
+
+    /**
+     * Hand a conversation to an agent ('' unassigns it).
+     *
+     * Unlike the other mutations this does not bump updated_at: a transfer is
+     * about who owns the chat, not about new activity, and it must not reshuffle
+     * the queue.
+     *
+     * @param string $assignedBy Agent id that performed the transfer ('' when unknown).
+     */
+    public function setAssignee(string $id, string $assignee, string $assignedBy = ''): bool
+    {
+        return $this->mutate($id, static function (array &$c) use ($assignee, $assignedBy): bool {
+            $c['assignee'] = $assignee;
+            $c['assignee_at'] = $assignee === '' ? 0 : time();
+            $c['assignee_by'] = $assignee === '' ? '' : $assignedBy;
+            return true;
+        }, false) !== null;
+    }
+
+    /** Clear a deleted agent from every conversation they were holding. */
+    public function unassignAll(string $assignee): int
+    {
+        if ($assignee === '') {
+            return 0;
+        }
+        $cleared = 0;
+        foreach ($this->listConversations() as $row) {
+            if ((string) ($row['assignee'] ?? '') !== $assignee) {
+                continue;
+            }
+            if ($this->setAssignee((string) $row['id'], '')) {
+                $cleared++;
+            }
+        }
+        return $cleared;
     }
 
     public function setStatus(string $id, string $status): bool
@@ -289,6 +342,7 @@ final class Store
                 'created_at' => (int) ($c['created_at'] ?? 0),
                 'updated_at' => (int) ($c['updated_at'] ?? 0),
                 'agent_unread' => (int) ($c['agent_unread'] ?? 0),
+                'assignee' => (string) ($c['assignee'] ?? ''),
                 'message_count' => count($messages),
                 'preview' => $preview,
             ];
@@ -447,8 +501,12 @@ final class Store
         }
     }
 
-    /** @param callable(array<string,mixed>&):bool $mutator Return false to abort the write. */
-    private function mutate(string $id, callable $mutator): ?array
+    /**
+     * @param callable(array<string,mixed>&):bool $mutator Return false to abort the write.
+     * @param bool $touch Stamp updated_at (set false for changes that are not
+     *        new activity, e.g. transferring a conversation).
+     */
+    private function mutate(string $id, callable $mutator, bool $touch = true): ?array
     {
         $path = $this->path($id);
         if ($path === null) {
@@ -469,7 +527,9 @@ final class Store
             if ($mutator($conversation) === false) {
                 return null;
             }
-            $conversation['updated_at'] = time();
+            if ($touch) {
+                $conversation['updated_at'] = time();
+            }
             $encoded = json_encode(
                 $conversation,
                 JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
@@ -507,9 +567,10 @@ final class Store
 
     /**
      * @param array{token:string,mime:string,name:string,size:int}|null $file
+     * @param list<string>|null $menu
      * @return array<string,mixed>
      */
-    private function message(string $role, string $text, int $at, ?array $file = null): array
+    private function message(string $role, string $text, int $at, ?array $file = null, ?array $menu = null): array
     {
         $message = ['role' => $role, 'text' => $text, 'at' => $at];
         if ($file !== null) {
@@ -519,6 +580,9 @@ final class Store
                 'name' => (string) $file['name'],
                 'size' => (int) $file['size'],
             ];
+        }
+        if ($menu !== null && $menu !== []) {
+            $message['menu'] = array_values($menu);
         }
         return $message;
     }
