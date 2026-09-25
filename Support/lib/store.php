@@ -19,14 +19,22 @@ final class Store
     public const STATUS_OPEN = 'open';
     public const STATUS_CLOSED = 'closed';
 
+    /** Seconds a typing ping stays live after the last keystroke. */
+    public const TYPING_TTL = 6;
+
     private string $chatDir;
+    private string $uploadDir;
+    private string $presenceDir;
 
     public function __construct(
         string $dataDir,
         private int $maxMessages = 500,
         private int $maxTextLength = 4000,
     ) {
-        $this->chatDir = rtrim($dataDir, "/\\") . DIRECTORY_SEPARATOR . 'chats';
+        $dataDir = rtrim($dataDir, "/\\");
+        $this->chatDir = $dataDir . DIRECTORY_SEPARATOR . 'chats';
+        $this->uploadDir = $dataDir . DIRECTORY_SEPARATOR . 'uploads';
+        $this->presenceDir = $dataDir . DIRECTORY_SEPARATOR . 'presence';
         $this->ensureDir($this->chatDir);
     }
 
@@ -55,8 +63,11 @@ final class Store
         return $path !== null && is_file($path);
     }
 
-    /** @return string The new conversation id. */
-    public function create(string $name, string $email, string $text, string $page = ''): string
+    /**
+     * @param array{token:string,mime:string,name:string,size:int}|null $file
+     * @return string The new conversation id.
+     */
+    public function create(string $name, string $email, string $text, string $page = '', ?array $file = null): string
     {
         $id = bin2hex(random_bytes(16));
         $now = time();
@@ -74,7 +85,7 @@ final class Store
             'messages' => [],
         ];
 
-        $conversation['messages'][] = $this->message(self::ROLE_VISITOR, $text, $now);
+        $conversation['messages'][] = $this->message(self::ROLE_VISITOR, $text, $now, $file);
         $conversation['agent_unread'] = 1;
 
         $this->writeNew($id, $conversation);
@@ -132,22 +143,27 @@ final class Store
         return ['conversation' => $conversation, 'messages' => $messages];
     }
 
-    /** @return array<string,mixed>|null Updated conversation, or null when missing/full/invalid. */
-    public function addMessage(string $id, string $role, string $text): ?array
+    /**
+     * Append a message. Text may be empty when an attachment carries the message.
+     *
+     * @param array{token:string,mime:string,name:string,size:int}|null $file
+     * @return array<string,mixed>|null Updated conversation, or null when missing/full/invalid.
+     */
+    public function addMessage(string $id, string $role, string $text, ?array $file = null): ?array
     {
         if ($role !== self::ROLE_VISITOR && $role !== self::ROLE_AGENT) {
             return null;
         }
         $text = $this->clean($text, $this->maxTextLength);
-        if ($text === '') {
+        if ($text === '' && $file === null) {
             return null;
         }
 
-        return $this->mutate($id, function (array &$c) use ($role, $text): bool {
+        return $this->mutate($id, function (array &$c) use ($role, $text, $file): bool {
             if (count($c['messages'] ?? []) >= $this->maxMessages) {
                 return false;
             }
-            $c['messages'][] = $this->message($role, $text, time());
+            $c['messages'][] = $this->message($role, $text, time(), $file);
             if ($role === self::ROLE_AGENT) {
                 $c['visitor_unread'] = ($c['visitor_unread'] ?? 0) + 1;
                 // An agent actively replying reopens a closed conversation.
@@ -179,7 +195,65 @@ final class Store
         if ($path === null || !is_file($path)) {
             return false;
         }
+
+        // Take the conversation's attachments with it, so uploads/ cannot grow
+        // into a pile of unreferenced files.
+        $conversation = $this->get($id);
+        foreach ($conversation['messages'] ?? [] as $message) {
+            $token = $message['file']['token'] ?? null;
+            if (is_string($token) && preg_match('/^[a-f0-9]{32}$/', $token) === 1) {
+                @unlink($this->uploadDir . DIRECTORY_SEPARATOR . $token);
+            }
+        }
+
+        // Drop its presence file too.
+        $presencePath = $this->presencePath($id);
+        if ($presencePath !== null) {
+            @unlink($presencePath);
+        }
+
         return @unlink($path);
+    }
+
+    /**
+     * Locate an attachment belonging to a conversation.
+     *
+     * Called by media.php, so it only ever returns a file that is actually
+     * referenced by that conversation — the token alone is not enough.
+     *
+     * @return array{path:string,mime:string,name:string,size:int}|null
+     */
+    public function findFile(string $id, string $token): ?array
+    {
+        if (preg_match('/^[a-f0-9]{32}$/', $token) !== 1) {
+            return null;
+        }
+
+        $conversation = $this->get($id);
+        if ($conversation === null) {
+            return null;
+        }
+
+        foreach ($conversation['messages'] ?? [] as $message) {
+            $file = is_array($message['file'] ?? null) ? $message['file'] : null;
+            if ($file === null || (string) ($file['token'] ?? '') !== $token) {
+                continue;
+            }
+
+            $path = $this->uploadDir . DIRECTORY_SEPARATOR . $token;
+            if (!is_file($path)) {
+                return null;
+            }
+
+            return [
+                'path' => $path,
+                'mime' => (string) ($file['mime'] ?? 'application/octet-stream'),
+                'name' => (string) ($file['name'] ?? 'file'),
+                'size' => (int) ($file['size'] ?? (filesize($path) ?: 0)),
+            ];
+        }
+
+        return null;
     }
 
     /**
@@ -202,6 +276,11 @@ final class Store
             }
             $messages = $c['messages'] ?? [];
             $last = end($messages);
+            $preview = is_array($last) ? (string) ($last['text'] ?? '') : '';
+            if ($preview === '' && is_array($last['file'] ?? null)) {
+                // An attachment-only message still needs something in the list.
+                $preview = media_is_video((string) ($last['file']['mime'] ?? '')) ? '🎬 Video' : '🖼 Photo';
+            }
             $rows[] = [
                 'id' => $c['id'],
                 'name' => $c['name'] ?? '',
@@ -211,7 +290,7 @@ final class Store
                 'updated_at' => (int) ($c['updated_at'] ?? 0),
                 'agent_unread' => (int) ($c['agent_unread'] ?? 0),
                 'message_count' => count($messages),
-                'preview' => is_array($last) ? (string) ($last['text'] ?? '') : '',
+                'preview' => $preview,
             ];
         }
         usort($rows, static fn (array $a, array $b): int => $b['updated_at'] <=> $a['updated_at']);
@@ -225,8 +304,148 @@ final class Store
     }
 
     // -----------------------------------------------------------------------
+    // Presence: typing pings and read watermarks
+    // -----------------------------------------------------------------------
+
+    /**
+     * Ephemeral per-conversation state, kept in its own file so that a keystroke
+     * never rewrites the conversation itself — doing so would bump updated_at,
+     * reorder the console list and reset every "time ago" value.
+     *
+     * @return array{typing:array<string,int>,read:array<string,int>}
+     */
+    public function presence(string $id): array
+    {
+        $blank = ['typing' => ['visitor' => 0, 'agent' => 0], 'read' => ['visitor' => 0, 'agent' => 0]];
+
+        $path = $this->presencePath($id);
+        if ($path === null || !is_file($path)) {
+            return $blank;
+        }
+        $raw = @file_get_contents($path);
+        if ($raw === false || $raw === '') {
+            return $blank;
+        }
+        $data = json_decode($raw, true);
+        if (!is_array($data)) {
+            return $blank;
+        }
+
+        return [
+            'typing' => [
+                'visitor' => (int) ($data['typing']['visitor'] ?? 0),
+                'agent' => (int) ($data['typing']['agent'] ?? 0),
+            ],
+            'read' => [
+                'visitor' => (int) ($data['read']['visitor'] ?? 0),
+                'agent' => (int) ($data['read']['agent'] ?? 0),
+            ],
+        ];
+    }
+
+    /** Whether $role is inside the typing window right now. */
+    public function isTyping(string $id, string $role): bool
+    {
+        $presence = $this->presence($id);
+        $at = (int) ($presence['typing'][$role] ?? 0);
+        return $at > 0 && (time() - $at) < self::TYPING_TTL;
+    }
+
+    /** Note that $role is composing a message. */
+    public function touchTyping(string $id, string $role): bool
+    {
+        if ($role !== self::ROLE_VISITOR && $role !== self::ROLE_AGENT) {
+            return false;
+        }
+        return $this->writePresence($id, static function (array &$presence) use ($role): bool {
+            $presence['typing'][$role] = time();
+            return true;
+        });
+    }
+
+    /** Stop showing $role as typing (called when their message is sent). */
+    public function clearTyping(string $id, string $role): void
+    {
+        $this->writePresence($id, static function (array &$presence) use ($role): bool {
+            if ((int) ($presence['typing'][$role] ?? 0) === 0) {
+                return false;
+            }
+            $presence['typing'][$role] = 0;
+            return true;
+        });
+    }
+
+    /** Record that $role has read $count messages. Writes only when it advances. */
+    public function markRead(string $id, string $role, int $count): void
+    {
+        $this->writePresence($id, static function (array &$presence) use ($role, $count): bool {
+            if ((int) ($presence['read'][$role] ?? 0) >= $count) {
+                return false;
+            }
+            $presence['read'][$role] = $count;
+            return true;
+        });
+    }
+
+    // -----------------------------------------------------------------------
     // Internals
     // -----------------------------------------------------------------------
+
+    private function presencePath(string $id): ?string
+    {
+        if (preg_match('/^[a-f0-9]{32}$/', $id) !== 1) {
+            return null;
+        }
+        return $this->presenceDir . DIRECTORY_SEPARATOR . $id . '.json';
+    }
+
+    /**
+     * Read-modify-write the presence file under an exclusive lock.
+     *
+     * @param callable(array{typing:array<string,int>,read:array<string,int>}&):bool $mutator
+     *        Return false to skip the write.
+     */
+    private function writePresence(string $id, callable $mutator): bool
+    {
+        $path = $this->presencePath($id);
+        if ($path === null) {
+            return false;
+        }
+        $this->ensureDir($this->presenceDir);
+
+        $handle = @fopen($path, 'c+b');
+        if ($handle === false) {
+            return false;
+        }
+        try {
+            if (!flock($handle, LOCK_EX)) {
+                return false;
+            }
+            $raw = (string) stream_get_contents($handle);
+            $data = json_decode($raw, true);
+            $presence = [
+                'typing' => [
+                    'visitor' => (int) ($data['typing']['visitor'] ?? 0),
+                    'agent' => (int) ($data['typing']['agent'] ?? 0),
+                ],
+                'read' => [
+                    'visitor' => (int) ($data['read']['visitor'] ?? 0),
+                    'agent' => (int) ($data['read']['agent'] ?? 0),
+                ],
+            ];
+            if ($mutator($presence) === false) {
+                return false;
+            }
+            ftruncate($handle, 0);
+            rewind($handle);
+            fwrite($handle, (string) json_encode($presence));
+            fflush($handle);
+            return true;
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
+    }
 
     /** @param callable(array<string,mixed>&):bool $mutator Return false to abort the write. */
     private function mutate(string $id, callable $mutator): ?array
@@ -286,10 +505,22 @@ final class Store
         @chmod($path, 0600);
     }
 
-    /** @return array<string,mixed> */
-    private function message(string $role, string $text, int $at): array
+    /**
+     * @param array{token:string,mime:string,name:string,size:int}|null $file
+     * @return array<string,mixed>
+     */
+    private function message(string $role, string $text, int $at, ?array $file = null): array
     {
-        return ['role' => $role, 'text' => $text, 'at' => $at];
+        $message = ['role' => $role, 'text' => $text, 'at' => $at];
+        if ($file !== null) {
+            $message['file'] = [
+                'token' => (string) $file['token'],
+                'mime' => (string) $file['mime'],
+                'name' => (string) $file['name'],
+                'size' => (int) $file['size'],
+            ];
+        }
+        return $message;
     }
 
     private function clean(string $value, int $max): string

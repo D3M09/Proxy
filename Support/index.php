@@ -2,26 +2,70 @@
 
 declare(strict_types=1);
 
+/**
+ * Public support center page — bare shell plus the "Online Consultant" widget.
+ *
+ * The look mirrors the reference consultant page: an empty, centred light-grey
+ * stage with the chat panel on top of it. The widget itself is this install's
+ * own widget.js, which talks to api.php and the agent console at /admin/, so
+ * visitor messages arrive there in realtime. Nothing is proxied.
+ */
+
 require __DIR__ . '/lib/bootstrap.php';
 
-$siteName = (string) ($config['site_name'] ?? 'Online Consultant');
-$pluginId = (string) ($config['plugin_id'] ?? 'g1l7xa9');
-$jsSrc    = (string) ($config['widget_js_src'] ?? '');
-if ($jsSrc === '') {
-    $jsSrc = $baseUrl . '/widget.js';
+$siteName = (string) ($config['site_name'] ?? 'Support Center');
+$accent = (string) ($config['widget_color'] ?? '#1762f6');
+
+// ---------------------------------------------------------------------------
+// Public base URL: an explicit config value wins, otherwise detect it from the
+// current request so the page is correct behind a proxy and in a subdirectory.
+// ---------------------------------------------------------------------------
+$baseUrl = rtrim(trim((string) ($config['base_url'] ?? '')), '/');
+if ($baseUrl === '') {
+    $scheme = is_https() ? 'https' : 'http';
+    $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+    $dir = rtrim(str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '/index.php'))), '/');
+    $baseUrl = $scheme . '://' . $host . $dir;
 }
-$bgImage = (string) ($config['public_bg_image'] ?? '');
-$bgAttr  = ($bgImage !== '')
-    ? "\n            background-image: url('" . e($bgImage) . "');"
-    : '';
+
+// Widget options are handed to widget.js as data-* attributes on its <script>.
+$quickReplies = $config['widget_quick_replies'] ?? [];
+$quickReplies = is_array($quickReplies) ? array_values(array_filter($quickReplies, 'is_string')) : [];
+
+$widgetOptions = [
+    'support-url'   => $baseUrl,
+    'title'         => (string) ($config['widget_title'] ?? 'Online Consultant'),
+    'subtitle'      => (string) ($config['widget_subtitle'] ?? ''),
+    'notice'        => (string) ($config['widget_notice'] ?? ''),
+    'greeting'      => (string) ($config['widget_greeting'] ?? ''),
+    'color'         => (string) ($config['widget_color'] ?? '#1762f6'),
+    'position'      => (string) ($config['widget_position'] ?? 'right') === 'left' ? 'left' : 'right',
+    'mode'          => (string) ($config['widget_mode'] ?? 'page') === 'bubble' ? 'bubble' : 'page',
+    'poll'          => (string) (int) ($config['poll_interval'] ?? 4000),
+    'max-upload-mb' => (string) (int) ($config['max_upload_mb'] ?? 25),
+    'accept'        => implode(',', array_keys(is_array($config['allowed_media'] ?? null) ? $config['allowed_media'] : [])),
+    'auto-open'     => ($config['widget_auto_open'] ?? false) === true ? '1' : '',
+    'quick-replies' => $quickReplies === []
+        ? ''
+        : (string) json_encode($quickReplies, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+];
+
+$widgetAttrs = '';
+foreach ($widgetOptions as $name => $value) {
+    if ($value !== '') {
+        $widgetAttrs .= ' data-' . $name . '="' . e($value) . '"';
+    }
+}
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="bn">
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <meta name="google" content="notranslate" />
+    <!-- viewport-fit=cover lets the composer sit above the home indicator; zoom is left enabled. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="<?= e($accent) ?>">
+    <meta name="google" content="notranslate">
     <title><?= e($siteName) ?></title>
     <style>
         * {
@@ -29,21 +73,21 @@ $bgAttr  = ($bgImage !== '')
             padding: 0;
         }
 
-        html, body {
+        html,
+        body {
             height: 100%;
+            overflow: hidden;
         }
 
+        /* The full-page chat panel paints over this stage. */
         .container {
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
+            width: 100%;
             height: 100%;
-            min-width: 100vw;
-            background-repeat: no-repeat;
-            background-size: contain;
-            background-position: center;
-            background-color: #eee;<?= $bgAttr ?>
+            background-color: #eee;
         }
     </style>
 </head>
@@ -51,116 +95,8 @@ $bgAttr  = ($bgImage !== '')
 <body>
 
     <div class="container"></div>
-    <script id="insertJs"></script>
 
-    <script>
-        let plugin_id = "<?= e($pluginId) ?>"
-        let js_src = "<?= e($jsSrc) ?>"
-        let is_chinese_ip =  0 
-
-        const container = document.querySelector('.container')
-
-        const standby_text = document.createElement('p')
-        standby_text.innerText = 'The link is invalid, Please check whether the plugin is opened normally'
-
-        const not_allowed = document.createElement('p')
-        not_allowed.innerText = 'Chinese IP is not allowed'
-
-        function handlePluginHide() {
-            const widget = document.querySelector('salesmartly-chat-widget');
-            if (widget) widget.remove();
-
-            if(is_chinese_ip){
-                container.appendChild(not_allowed);
-                return true
-            }
-            container.appendChild(standby_text);
-            return true
-        }
-
-        function handleShowMode(type) {
-            if (type === 'exclusiveLinkNoOpen') {
-                handlePluginHide()
-            }
-        }
-
-        if (plugin_id) {
-            const $js = document.getElementById('insertJs')
-            if ($js) $js.innerHTML = `
-                (function(d, s, id, w, n) {
-                    w.__ssc = w.__ssc || {};
-                    w.__ssc.license = ${JSON.stringify(plugin_id)};
-                    if (w.ssq) return false;
-                    n = w.ssq = function() {n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};
-                    n.push=n;n.loaded=!0;n.queue=[];
-                    var isWidgetLoaded = false;
-                    function loadWidget() {
-                        if (isWidgetLoaded || d.getElementById(id)) return;
-                        isWidgetLoaded = true;
-                        var js, sjs = d.getElementsByTagName(s)[0];
-                        js = d.createElement(s); js.id = id;
-                        var deUrl = atob('aHR0cHM6Ly9wbHVnaW4tY29kZS5zYWxlc21hcnRseS5jb20='), path = '/chat/widget-v2/testing/install.js';
-                        var cs = d.currentScript, csUrl = deUrl;
-                        if (cs && cs.src) {var scriptURL = new URL(cs.src); csUrl = scriptURL.origin;}
-                        js.src = ${JSON.stringify(js_src)};
-                        sjs.parentNode.insertBefore(js, sjs);
-                        js.onerror = function() {
-                            if (d.getElementById(id)) {var el = d.getElementById(id); el.parentNode.removeChild(el);}
-                            var newJs = d.createElement(s); newJs.id = id;
-                            newJs.src = deUrl + path;
-                            sjs.parentNode.insertBefore(newJs, sjs);
-                        }
-                    }
-                    var searchParams = new URLSearchParams(w.location.search);
-                    var loginInfoText = searchParams.get('setLoginInfo');
-                    var loginInfo;
-                    if (loginInfoText) {
-                        try {
-                            var parsedLoginInfo = JSON.parse(loginInfoText);
-                            if (parsedLoginInfo && typeof parsedLoginInfo === 'object' && !Array.isArray(parsedLoginInfo)) {
-                                loginInfo = parsedLoginInfo;
-                            }
-                        } catch (error) {}
-                    }
-                    if (loginInfo) {
-                        w.ssq.push('setLoginInfo', loginInfo);
-                        loadWidget();
-                        return;
-                    }
-                    if (searchParams.get('loginSource') !== 'postMessage') {
-                        loadWidget();
-                        return;
-                    }
-                    function handleLoginMessage(event) {
-                        if (event.source !== w || event.origin !== w.location.origin || typeof event.data !== 'string') return;
-                        var message;
-                        try {
-                            message = JSON.parse(event.data);
-                        } catch (error) {
-                            return;
-                        }
-                        if (!message || typeof message !== 'object' || Array.isArray(message)) return;
-                        if (message.type !== 'service-link-login' || message.version !== 1) return;
-                        var payload = message.payload;
-                        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
-                        w.removeEventListener('message', handleLoginMessage);
-                        w.ssq.push('setLoginInfo', payload);
-                    }
-                    w.addEventListener('message', handleLoginMessage);
-                    loadWidget();
-                }(document, 'script', 'ss-chat', window));
-                
-                window.__ssc.setting = {mode:'exclusiveLink', modeSelector:  '#ss-chat-page', overTime: '',  isCustomized: 0};
-            `
-
-            window.ssq.push('setExclusiveLink', (data) => {
-                const { type = ''} = data
-                handleShowMode(type)
-            })
-        } else {
-            handlePluginHide()
-        }
-    </script>
+    <script src="<?= e($baseUrl) ?>/widget.js"<?= $widgetAttrs ?> async></script>
 </body>
 
 </html>

@@ -2,9 +2,10 @@
 
 A small customer support center built with plain PHP:
 
-- **Public support page** with FAQ and a call-to-action that opens the chat.
-- **"Online Consultant" chat widget** — one `<script>` tag, embeddable on any site, no dependencies.
+- **Public support page** — a bare, centred stage that opens the consultant widget on load.
+- **"Online Consultant" chat widget** — one `<script>` tag, embeddable on any site, no dependencies, with template replies and scripted auto-replies.
 - **Agent console** at `/admin/` — shared-password login, conversation queue, live thread, replies, close/reopen, delete.
+- **Attachments** — both visitors and agents can send images and video. Uploads land in `data/uploads/` and are served back through `media.php`.
 
 There is **no database**. Conversations are stored as JSON files under `data/chats/`, each guarded by `flock()`, so you can back everything up by copying one folder.
 
@@ -41,12 +42,15 @@ required. Optional attributes:
 | Attribute | Default | Purpose |
 | --- | --- | --- |
 | `data-support-url` | script origin | Base URL of this support center |
-| `data-title` | `Online Consultant` | Header title |
-| `data-subtitle` | — | Small line under the title |
+| `data-title` | `Online Consultant` | Header brand |
+| `data-subtitle` | — | Small line under the brand |
+| `data-notice` | — | Scrolling notice under the header (empty hides it) |
 | `data-greeting` | `Hi! How can we help you today?` | Bubble shown in an empty thread |
-| `data-color` | `#1f6feb` | Accent colour |
+| `data-quick-replies` | — | JSON array of quick-reply button labels |
+| `data-color` | `#1762f6` | Accent colour |
 | `data-position` | `right` | `right` or `left` |
 | `data-poll` | `4000` | Polling interval in ms |
+| `data-auto-open` | — | `1` opens the panel on load |
 
 From your own JavaScript:
 
@@ -57,9 +61,28 @@ SupportCenter.close();
 
 ## Configuration
 
-Everything lives in `config.php`: branding, widget text and colours, polling interval,
-message limits, FAQ entries, timezone, session name, login throttling, and the optional
-pinned admin password hash.
+Everything lives in `config.php`: branding, widget text and colours, the template replies
+and their scripted answers, polling interval, message limits, timezone, session name,
+login throttling, and the optional pinned admin password hash.
+
+`widget_mode` picks the widget layout:
+
+- `page` (the default) — the chat fills the viewport, so the whole page *is* the message
+  box, as on the reference consultant page.
+- `bubble` — the usual floating launcher in the corner. Use this for the embeddable
+  snippet on other sites.
+
+### Template replies and scripted auto-replies
+
+`widget_quick_replies` renders a button group in an empty thread. Clicking one sends its
+label immediately: the visitor does **not** have to give a name or an email, and the
+console labels such conversations *Anonymous visitor*.
+
+`auto_replies` maps an exact visitor message to an agent answer. The template labels are
+the keys, so clicking a template gets an answer with no agent online — the same way the
+reference widget behaves. The check runs in `api.php`, so the scripted answer is stored
+in the conversation and appears in the console too. Set it to `[]` to switch auto-reply
+off.
 
 Set `base_url` once you are on a real domain so the embed snippet and absolute links are
 correct behind a proxy:
@@ -75,13 +98,18 @@ data/
 ├── .htaccess        # denies web access on Apache
 ├── admin.json       # bcrypt hash of the admin password
 ├── throttle.json    # hashed failed-login counters
-└── chats/
-    ├── <32 hex id>.json
-    └── …
+├── chats/
+│   ├── <32 hex id>.json
+│   └── …
+└── uploads/
+    └── <32 hex token>   # an attachment, no extension, served only via media.php
 ```
 
 Each chat file holds the visitor name/email, the page the chat started from, status,
-unread counters and the message list. The id is a 128-bit random token.
+unread counters and the message list. The id is a 128-bit random token. A message that
+carries an attachment also holds a `file` block (token, detected type, original name,
+size); the bytes live in `data/uploads/<token>`. Deleting a conversation deletes its
+attachments with it, so `uploads/` cannot accumulate orphans.
 
 **Backing up** = copy `data/`. **Deleting history** = delete files in `data/chats/`.
 
@@ -106,6 +134,15 @@ Already handled:
   build a path directly — path traversal is not possible.
 - All user content is escaped on output and limits are enforced on input.
 - `api.php` rate-limits new chats and message sending per IP.
+- Uploads are checked against the file's **real** content type (`finfo`), never the type
+  the browser claims, and only types listed in `allowed_media` are kept. SVG is excluded
+  because it can carry script.
+- Stored attachments have no filename extension and sit in `data/uploads/`, below the
+  `data/.htaccess` deny rule, so nothing a visitor sends can be executed or fetched
+  directly. Every download goes out through `media.php` with a fixed `Content-Type` and
+  `X-Content-Type-Options: nosniff`.
+- `media.php` requires either an agent session or the conversation id, and the token must
+  actually be referenced by that conversation — a guessed token alone gets a 404.
 
 What you should do:
 
@@ -123,7 +160,7 @@ What you should do:
 ## Layout
 
 ```
-index.php          public support page (FAQ + widget embed snippet)
+index.php          public support page (centred stage + widget, self-hosted)
 widget.js          self-contained chat widget (CSS + DOM injected, no deps)
 api.php            public JSON API: start / send / poll
 config.php         all settings
@@ -131,6 +168,8 @@ lib/bootstrap.php  config + session + store wiring
 lib/store.php      flat-file conversation store (flock, atomic writes)
 lib/http.php       escaping, JSON output, CSRF, time helpers
 lib/throttle.php   file-backed rate limiter
+lib/upload.php     attachment validation and safe storage
+media.php          serves attachments (authorised, supports video Range)
 admin/index.php    agent console (login, queue, reply, settings)
 admin/api.php      JSON for the console's live refresh
 admin/partials.php shared HTML rendering

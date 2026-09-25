@@ -55,7 +55,18 @@ function set_flash(string $type, string $message): void
 
 function redirect_to(string $suffix = ''): never
 {
-    header('Location: index.php' . $suffix, true, 303);
+    // Use the current script's absolute path so the redirect stays inside
+    // /admin/ even when the console was opened as ".../admin" (no trailing
+    // slash / no index.php). A relative "Location: index.php..." would then
+    // resolve to ".../index.php" — the public customer view.
+    $script = (string) ($_SERVER['SCRIPT_NAME'] ?? 'index.php');
+    if (substr($script, -4) !== '.php') {
+        $script = rtrim($script, '/') . '/index.php';
+    }
+    if ($script === '') {
+        $script = 'index.php';
+    }
+    header('Location: ' . $script . $suffix, true, 303);
     exit;
 }
 
@@ -183,18 +194,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (preg_match('/^[a-f0-9]{32}$/', $id) !== 1) {
             set_flash('error', 'That conversation no longer exists.');
             redirect_to();
-        } elseif ($message === '') {
-            set_flash('error', 'Write a reply before sending.');
-            redirect_to('?id=' . $id);
-        } else {
-            $updated = $store->addMessage($id, Store::ROLE_AGENT, $message);
-            if ($updated === null) {
-                set_flash('error', 'The reply could not be saved.');
-                redirect_to('?id=' . $id);
-            }
-            $store->poll($id, 0, Store::ROLE_AGENT); // the agent is looking at it now
+        }
+
+        try {
+            $upload = save_upload('file', $config);
+        } catch (RuntimeException $e) {
+            set_flash('error', $e->getMessage());
             redirect_to('?id=' . $id);
         }
+
+        // An attachment with no caption is a valid reply.
+        if ($message === '' && $upload === null) {
+            set_flash('error', 'Write a reply or attach an image/video.');
+            redirect_to('?id=' . $id);
+        }
+
+        $updated = $store->addMessage($id, Store::ROLE_AGENT, $message, $upload);
+        if ($updated === null) {
+            set_flash('error', 'The reply could not be saved.');
+            redirect_to('?id=' . $id);
+        }
+        $store->poll($id, 0, Store::ROLE_AGENT); // the agent is looking at it now
+        redirect_to('?id=' . $id);
     }
 
     // -------------------------------------------------------- status/delete
@@ -257,6 +278,28 @@ if ($isAgent) {
 
 $totalMessages = $conversation === null ? 0 : count($conversation['messages'] ?? []);
 $siteName = (string) ($config['site_name'] ?? 'Support Center');
+// Absolute script path for links/forms/redirects so the console never leaks
+// to the public page when opened as ".../admin" (no trailing slash).
+$selfPath = (string) ($_SERVER['SCRIPT_NAME'] ?? 'index.php');
+if (substr($selfPath, -4) !== '.php') {
+    $selfPath = rtrim($selfPath, '/') . '/index.php';
+}
+if ($selfPath === '') {
+    $selfPath = 'index.php';
+}
+// Absolute admin API endpoint for the live refresh (same reason: a relative
+// "api.php" from ".../admin" would resolve to the public /api.php).
+$adminApiPath = str_replace('\\', '/', (string) dirname($selfPath));
+$adminApiPath = $adminApiPath === '.' || $adminApiPath === '' ? 'api.php' : rtrim($adminApiPath, '/') . '/api.php';
+// Absolute stylesheet path for the same reason ("../assets/..." breaks from ".../admin").
+$adminDir = str_replace('\\', '/', (string) dirname($selfPath));
+$assetsBase = str_replace('\\', '/', (string) dirname($adminDir));
+$assetsPath = ($adminDir === '.' || $adminDir === '' || $adminDir === '/')
+    ? '../assets/style.css'
+    : rtrim($assetsBase, '/') . '/assets/style.css';
+if (strpos($assetsPath, '/') !== 0 && $assetsPath !== '../assets/style.css') {
+    $assetsPath = '/' . ltrim($assetsPath, '/');
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -265,7 +308,7 @@ $siteName = (string) ($config['site_name'] ?? 'Support Center');
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title><?= e($siteName) ?> — Agent console</title>
-<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="<?= e($assetsPath) ?>">
 </head>
 <body<?= $isAgent ? ' class="admin"' : '' ?>>
 
@@ -284,7 +327,7 @@ $siteName = (string) ($config['site_name'] ?? 'Support Center');
       <?php endif; ?>
 
       <?php if ($needsSetup): ?>
-        <form method="post" autocomplete="off">
+        <form method="post" action="<?= e($selfPath) ?>" autocomplete="off">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="setup">
           <label class="field" for="password">New password (min <?= $minPassword ?> characters)</label>
@@ -294,7 +337,7 @@ $siteName = (string) ($config['site_name'] ?? 'Support Center');
           <p><button class="btn" type="submit" style="width:100%;justify-content:center;margin-top:16px">Create and sign in</button></p>
         </form>
       <?php else: ?>
-        <form method="post">
+        <form method="post" action="<?= e($selfPath) ?>">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="login">
           <label class="field" for="password">Password</label>
@@ -308,11 +351,11 @@ $siteName = (string) ($config['site_name'] ?? 'Support Center');
 <?php else: ?>
 
   <div class="admin-bar">
-    <a class="brand" href="index.php"><span class="dot"><?= e(mb_strtoupper(mb_substr($siteName, 0, 1))) ?></span> Agent console</a>
+    <a class="brand" href="<?= e($selfPath) ?>"><span class="dot"><?= e(mb_strtoupper(mb_substr($siteName, 0, 1))) ?></span> Agent console</a>
     <span class="pill<?= $unreadTotal > 0 ? ' unread' : '' ?>" id="unreadPill"><?= (int) $unreadTotal ?> unread</span>
     <span class="spacer"></span>
-    <a class="btn ghost small" href="index.php?view=settings">Settings</a>
-    <form method="post" style="display:inline">
+    <a class="btn ghost small" href="<?= e($selfPath) ?>?view=settings">Settings</a>
+    <form method="post" action="<?= e($selfPath) ?>" style="display:inline">
       <?= csrf_field() ?>
       <button class="btn ghost small" name="action" value="logout" type="submit">Sign out</button>
     </form>
@@ -329,7 +372,7 @@ $siteName = (string) ($config['site_name'] ?? 'Support Center');
         <?php if ($configuredHash !== ''): ?>
           <p class="muted">The password is pinned by <code>admin_password_hash</code> in <code>config.php</code>. Remove that value to manage it here.</p>
         <?php else: ?>
-          <form method="post">
+          <form method="post" action="<?= e($selfPath) ?>">
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="password">
             <label class="field" for="current">Current password</label>
@@ -371,7 +414,9 @@ $siteName = (string) ($config['site_name'] ?? 'Support Center');
                id="thread"
                data-id="<?= e((string) $selectedId) ?>"
                data-cursor="<?= (int) $totalMessages ?>"
-               data-poll="<?= (int) $pollMs ?>">
+               data-poll="<?= (int) $pollMs ?>"
+               data-api="<?= e($adminApiPath) ?>"
+               data-csrf="<?= e(csrf_token()) ?>">
 
         <?php if ($conversation === null): ?>
           <div class="thread-head"><h2>No conversation selected</h2></div>
@@ -401,7 +446,7 @@ $siteName = (string) ($config['site_name'] ?? 'Support Center');
             </div>
             <span class="spacer"></span>
             <span class="tag <?= e($status) ?>" id="statusTag"><?= e($status === 'open' ? 'Open' : 'Closed') ?></span>
-            <form method="post" style="display:inline">
+            <form method="post" action="<?= e($selfPath) ?>" style="display:inline">
               <?= csrf_field() ?>
               <input type="hidden" name="id" value="<?= e((string) $selectedId) ?>">
               <input type="hidden" name="status" value="<?= $status === 'open' ? 'closed' : 'open' ?>">
@@ -409,7 +454,7 @@ $siteName = (string) ($config['site_name'] ?? 'Support Center');
                 <?= $status === 'open' ? 'Close' : 'Reopen' ?>
               </button>
             </form>
-            <form method="post" style="display:inline" onsubmit="return confirm('Delete this conversation permanently?')">
+            <form method="post" action="<?= e($selfPath) ?>" style="display:inline" onsubmit="return confirm('Delete this conversation permanently?')">
               <?= csrf_field() ?>
               <input type="hidden" name="id" value="<?= e((string) $selectedId) ?>">
               <button class="btn ghost small" name="action" value="delete" type="submit">Delete</button>
@@ -417,17 +462,24 @@ $siteName = (string) ($config['site_name'] ?? 'Support Center');
           </div>
 
           <div class="thread-body" id="threadBody">
-            <?= render_messages($conversation['messages'] ?? []) ?>
+            <?= render_messages($conversation['messages'] ?? [], (string) $selectedId) ?>
           </div>
 
-          <form class="reply" method="post" id="replyForm">
+          <form class="reply" method="post" action="<?= e($selfPath) ?>" id="replyForm" enctype="multipart/form-data"
+                data-max-mb="<?= (int) ($config['max_upload_mb'] ?? 25) ?>">
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="reply">
             <input type="hidden" name="id" value="<?= e((string) $selectedId) ?>">
-            <textarea name="message" id="replyText" placeholder="Write a reply… (Ctrl+Enter to send)" required maxlength="<?= (int) ($config['max_message_length'] ?? 4000) ?>"></textarea>
+            <textarea name="message" id="replyText" placeholder="Write a reply… (Ctrl+Enter to send)" maxlength="<?= (int) ($config['max_message_length'] ?? 4000) ?>"></textarea>
             <div class="row">
+              <label class="attach" title="Attach an image or video">
+                <input type="file" name="file" id="replyFile" hidden
+                       accept="<?= e(implode(',', array_keys($config['allowed_media'] ?? []))) ?>">
+                <span aria-hidden="true">📎</span> Attach
+              </label>
               <button class="btn" type="submit">Send reply</button>
               <button class="btn ghost" type="button" id="canned">Insert canned reply</button>
+              <span class="hint typing" id="typingHint"></span>
               <span class="hint" id="replyHint"></span>
             </div>
           </form>
@@ -443,6 +495,9 @@ $siteName = (string) ($config['site_name'] ?? 'Support Center');
       var list = document.getElementById('convList');
       var pill = document.getElementById('unreadPill');
       var hint = document.getElementById('replyHint');
+      var typingHint = document.getElementById('typingHint');
+      var csrf = thread.dataset.csrf || '';
+      var apiBase = thread.dataset.api || 'api.php';
       var id = thread.dataset.id;
       var cursor = parseInt(thread.dataset.cursor, 10) || 0;
       var pollMs = parseInt(thread.dataset.poll, 10) || 4000;
@@ -458,11 +513,35 @@ $siteName = (string) ($config['site_name'] ?? 'Support Center');
         return fetch(url, { credentials: 'same-origin' }).then(function (r) { return r.json(); });
       }
 
+      function showTyping(on) {
+        if (typingHint) typingHint.textContent = on ? 'Visitor is typing…' : '';
+      }
+
+      // The visitor's read receipt: mark the last agent bubble they have seen.
+      function markSeen(visitorRead) {
+        if (!body) return;
+        var bubbles = body.querySelectorAll('.bubble.agent');
+        Array.prototype.forEach.call(bubbles, function (bubble) {
+          var stale = bubble.querySelector('.seen');
+          if (stale) stale.remove();
+        });
+
+        if (!bubbles.length || visitorRead <= 0) return;
+        var last = bubbles[bubbles.length - 1];
+        var index = parseInt(last.dataset.index, 10);
+        if (isNaN(index) || visitorRead <= index) return;
+
+        var mark = document.createElement('span');
+        mark.className = 'seen';
+        mark.textContent = '\u2713\u2713 Seen';
+        last.appendChild(mark);
+      }
+
       if (body) { toBottom(); }
 
       // Live list refresh (new conversations, unread counts).
       setInterval(function () {
-        get('api.php?what=list&id=' + encodeURIComponent(id || '')).then(function (data) {
+        get(apiBase + '?what=list&id=' + encodeURIComponent(id || '')).then(function (data) {
           if (!data.ok) return;
           if (list) list.innerHTML = data.list_html;
           if (pill) {
@@ -472,37 +551,180 @@ $siteName = (string) ($config['site_name'] ?? 'Support Center');
         }).catch(function () {});
       }, 10000);
 
-      // Live thread refresh.
-      if (id) {
-        setInterval(function () {
-          var stick = atBottom();
-          get('api.php?what=thread&id=' + encodeURIComponent(id) + '&after=' + cursor).then(function (data) {
-            if (!data.ok) return;
-            if (data.reset) {
-              body.innerHTML = data.messages_html;
-              cursor = data.cursor;
-              toBottom();
-              return;
-            }
-            if (data.messages_html) {
-              body.insertAdjacentHTML('beforeend', data.messages_html);
-              if (stick) toBottom();
-              note('New message received');
-              setTimeout(function () { note(''); }, 4000);
-            }
-            cursor = data.cursor;
-          }).catch(function () {});
-        }, pollMs);
+      // Append bubble HTML without duplicating indexes already on screen
+      // (a poll started before our own send can otherwise re-deliver it).
+      function appendHtml(html, stick) {
+        if (!body || !html) return;
+        var tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        var nodes = tmp.querySelectorAll('.bubble[data-index]');
+        var added = false;
+        Array.prototype.forEach.call(nodes, function (node) {
+          var idx = node.getAttribute('data-index');
+          if (idx !== null && body.querySelector('.bubble[data-index="' + idx + '"]')) return;
+          body.appendChild(node);
+          added = true;
+        });
+        if (added && stick !== false) toBottom();
       }
 
-      // Ctrl+Enter sends the reply.
+      function applyReplyMeta(data) {
+        if (!data) return;
+        if (typeof data.cursor === 'number') cursor = data.cursor;
+        if (data.status) {
+          var tag = document.getElementById('statusTag');
+          if (tag) {
+            tag.textContent = data.status === 'open' ? 'Open' : 'Closed';
+            tag.className = 'tag ' + data.status;
+          }
+        }
+        if (data.list_html && list) list.innerHTML = data.list_html;
+        if (typeof data.unread === 'number' && pill) {
+          pill.textContent = data.unread + ' unread';
+          pill.className = data.unread > 0 ? 'pill unread' : 'pill';
+        }
+        if (data.presence) {
+          markSeen(data.presence.read ? data.presence.read.visitor : 0);
+          showTyping(!!(data.presence.typing && data.presence.typing.visitor));
+        }
+      }
+
+      // Live thread refresh: messages plus typing/read presence.
+      function pollThread() {
+        if (!id) return;
+        var stick = atBottom();
+        get(apiBase + '?what=thread&id=' + encodeURIComponent(id) + '&after=' + cursor).then(function (data) {
+          if (!data.ok) return;
+          if (data.reset) {
+            body.innerHTML = data.messages_html;
+            cursor = data.cursor;
+            toBottom();
+          } else if (data.messages_html) {
+            appendHtml(data.messages_html, stick);
+            note('New message received');
+            setTimeout(function () { note(''); }, 4000);
+          }
+          cursor = data.cursor;
+
+          if (data.presence) {
+            markSeen(data.presence.read ? data.presence.read.visitor : 0);
+            showTyping(!!(data.presence.typing && data.presence.typing.visitor));
+          }
+        }).catch(function () {});
+      }
+
+      if (id) {
+        pollThread();
+        setInterval(pollThread, pollMs);
+      }
+
+      // Ctrl+Enter sends the reply; typing tells the visitor someone is composing.
       var replyText = document.getElementById('replyText');
+      var replyFile = document.getElementById('replyFile');
+      var replyForm = document.getElementById('replyForm');
+      var sending = false;
+      if (replyForm) {
+        var sendBtn = replyForm.querySelector('button[type="submit"]');
+        var maxMb = parseInt(replyForm.dataset.maxMb, 10) || 25;
+
+        // Attachment picker: show the chosen filename and enforce the size limit.
+        if (replyFile) {
+          replyFile.addEventListener('change', function () {
+            var file = replyFile.files && replyFile.files[0];
+            if (!file) { note(''); return; }
+            if (file.size > maxMb * 1024 * 1024) {
+              window.alert('That file is larger than the ' + maxMb + ' MB limit.');
+              replyFile.value = '';
+              note('');
+              return;
+            }
+            note('Attached: ' + file.name);
+          });
+        }
+
+        function setSending(on) {
+          sending = on;
+          if (sendBtn) sendBtn.disabled = on;
+          if (replyText) replyText.disabled = on;
+          if (sendBtn) sendBtn.textContent = on ? 'Sending…' : 'Send reply';
+        }
+
+        // No-reload send: POST to admin/api.php and append the new bubbles.
+        // The plain form POST to index.php stays as a no-JS fallback.
+        replyForm.addEventListener('submit', function (event) {
+          event.preventDefault();
+          if (sending || !id) return;
+          var text = replyText ? replyText.value.trim() : '';
+          var hasFile = !!(replyFile && replyFile.files && replyFile.files[0]);
+          if (!text && !hasFile) {
+            note('Write a reply or attach an image/video.');
+            if (replyText) replyText.focus();
+            return;
+          }
+          if (hasFile && replyFile.files[0].size > maxMb * 1024 * 1024) {
+            window.alert('That file is larger than the ' + maxMb + ' MB limit.');
+            return;
+          }
+          setSending(true);
+          note('Sending…');
+
+          var form = new FormData();
+          form.append('what', 'reply');
+          form.append('id', id);
+          form.append('csrf', csrf);
+          form.append('message', replyText ? replyText.value : '');
+          if (hasFile) form.append('file', replyFile.files[0]);
+
+          fetch(apiBase, { method: 'POST', credentials: 'same-origin', body: form })
+            .then(function (r) {
+              return r.text().then(function (text) {
+                var data = null;
+                try { data = JSON.parse(text); } catch (e) { data = null; }
+                if (!data) throw new Error(text || 'Invalid or expired security token. Reload the page and try again.');
+                if (!r.ok || !data.ok) throw new Error(data.error || 'The reply could not be sent.');
+                return data;
+              });
+            })
+            .then(function (data) {
+              appendHtml(data.messages_html, true);
+              applyReplyMeta(data);
+              if (replyText) { replyText.value = ''; replyText.focus(); }
+              if (replyFile) replyFile.value = '';
+              note('Sent');
+              setTimeout(function () { note(''); }, 2500);
+            })
+            .catch(function (err) {
+              if (/not signed in/i.test(err.message || '')) { location.reload(); return; }
+              note(err.message || 'The reply could not be sent.');
+              window.alert(err.message || 'The reply could not be sent.');
+            })
+            .finally(function () { setSending(false); });
+        });
+      }
       if (replyText) {
+        var lastTypingPing = 0;
+
         replyText.addEventListener('keydown', function (event) {
           if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
             event.preventDefault();
-            document.getElementById('replyForm').submit();
+            if (replyForm) {
+              if (typeof replyForm.requestSubmit === 'function') replyForm.requestSubmit();
+              else replyForm.dispatchEvent(new Event('submit', { cancelable: true }));
+            }
           }
+        });
+
+        replyText.addEventListener('input', function () {
+          var now = Date.now();
+          if (!id || now - lastTypingPing < 2000) return;
+          lastTypingPing = now;
+
+          fetch(apiBase, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+            body: new URLSearchParams({ what: 'typing', id: id, csrf: csrf })
+          }).catch(function () {});
         });
       }
 

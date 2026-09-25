@@ -10,6 +10,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/http.php';
 require_once __DIR__ . '/store.php';
 require_once __DIR__ . '/throttle.php';
+require_once __DIR__ . '/upload.php';
 
 /** @var array<string,mixed> $config */
 $config = require dirname(__DIR__) . '/config.php';

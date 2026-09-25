@@ -50,21 +50,64 @@ function render_list_items(array $rows, ?string $selectedId = null): string
 }
 
 /**
- * Message bubbles.
+ * Message bubbles, including any attachment.
  *
  * @param list<array<string,mixed>> $messages
  */
-function render_messages(array $messages): string
+function render_messages(array $messages, string $chatId = '', int $offset = 0): string
 {
     $html = '';
-    foreach ($messages as $message) {
+    foreach (array_values($messages) as $i => $message) {
         $agent = ($message['role'] ?? '') === 'agent';
         $at = (int) ($message['at'] ?? 0);
-        $html .= '<div class="bubble' . ($agent ? ' agent' : '') . '">'
-            . '<span class="role">' . ($agent ? 'Agent' : 'Visitor') . '</span>'
-            . '<div>' . e((string) ($message['text'] ?? '')) . '</div>'
-            . '<time datetime="' . e(date('c', $at)) . '">' . e(date('M j, H:i', $at)) . '</time>'
+        $text = (string) ($message['text'] ?? '');
+        $file = is_array($message['file'] ?? null) ? $message['file'] : null;
+
+        // data-index is the absolute message index so the console can place
+        // the Seen marker from the presence feed (incremental polls pass $offset).
+        $html .= '<div class="bubble' . ($agent ? ' agent' : '') . '" data-index="' . ($offset + $i) . '">'
+            . '<span class="role">' . ($agent ? 'Agent' : 'Visitor') . '</span>';
+
+        if ($file !== null) {
+            $html .= render_attachment($chatId, $file);
+        }
+        if ($text !== '') {
+            $html .= '<div>' . e($text) . '</div>';
+        }
+
+        $html .= '<time datetime="' . e(date('c', $at)) . '">' . e(date('M j, H:i', $at)) . '</time>'
             . '</div>';
     }
     return $html;
+}
+
+/**
+ * An image or video block. media.php is one directory up from the console.
+ *
+ * @param array<string,mixed> $file
+ */
+function render_attachment(string $chatId, array $file): string
+{
+    $token = (string) ($file['token'] ?? '');
+    if (preg_match('/^[a-f0-9]{32}$/', $token) !== 1) {
+        return '';
+    }
+    if (preg_match('/^[a-f0-9]{32}$/', $chatId) !== 1) {
+        return '';
+    }
+
+    $url = '../media.php?id=' . rawurlencode($chatId) . '&f=' . rawurlencode($token);
+    $mime = (string) ($file['mime'] ?? '');
+    $name = (string) ($file['name'] ?? '');
+    $label = $name !== '' ? $name : 'attachment';
+    $meta = e($label) . ' · ' . e(format_bytes((int) ($file['size'] ?? 0)));
+
+    if (media_is_video($mime)) {
+        return '<div class="media"><video class="media-video" controls preload="metadata" src="' . e($url) . '"></video>'
+            . '<a class="media-name" href="' . e($url) . '" target="_blank" rel="noreferrer noopener">' . $meta . '</a></div>';
+    }
+
+    return '<div class="media"><a href="' . e($url) . '" target="_blank" rel="noreferrer noopener">'
+        . '<img class="media-img" src="' . e($url) . '" alt="' . e($label) . '" loading="lazy"></a>'
+        . '<span class="media-name">' . $meta . '</span></div>';
 }

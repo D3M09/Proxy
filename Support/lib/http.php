@@ -103,6 +103,23 @@ function csrf_check(): void
     }
 }
 
+/** Human-friendly byte size, e.g. "1.4 MB". */
+function format_bytes(int $bytes): string
+{
+    $bytes = max(0, $bytes);
+    if ($bytes < 1024) {
+        return $bytes . ' B';
+    }
+    $value = $bytes / 1024;
+    foreach (['KB', 'MB', 'GB'] as $unit) {
+        if ($value < 1024) {
+            return ($value < 10 ? number_format($value, 1) : (string) round($value)) . ' ' . $unit;
+        }
+        $value /= 1024;
+    }
+    return round($value) . ' TB';
+}
+
 /** Human-friendly relative time, e.g. "3 min ago". */
 function time_ago(int $timestamp): string
 {
