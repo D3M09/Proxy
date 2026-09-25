@@ -122,8 +122,8 @@
       text('.pay-way-msg-info', 'অর্ডার পাওয়া যায়নি');
     });
 
-  // Footer: [লেনদেন রেকর্ড] -> voucher center, [জমা দিতে সম্পূর্ণ] -> payment,
-  // [অন্য একটি] -> voucher center.
+  // Footer: [লেনদেন রেকর্ড] -> voucher center, [জমা দিতে সম্পূর্ণ] -> member
+  // home, [অন্য একটি] -> voucher center.
   var buttons = document.querySelectorAll('.voucher-msg-v2-footer .voucher-btn');
   if (buttons[0]) {
     buttons[0].addEventListener('click', function () {
@@ -132,7 +132,7 @@
   }
   if (buttons[1]) {
     buttons[1].addEventListener('click', function () {
-      location.href = 'payment.php?tracking=' + encodeURIComponent(tracking);
+      location.href = '/m/member/home';
     });
   }
   if (buttons[2]) {
